@@ -25,7 +25,7 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. کدهای فلاتر متمرکز بر سیستم سیر و نمودار گراف قطار
+          # ۱. کدهای فلاتر متمرکز بر سیستم سیر و نمودار گراف قطار (نسخه اصلاح شده بدون باگ دارت)
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:shared_preferences/shared_preferences.dart';
@@ -51,7 +51,6 @@ jobs:
             }
           }
 
-          // مدل داده‌ای برای ذخیره هر خط سیر
           class TrainTrip {
             final String rawLine;
             final String type; // S or E
@@ -127,7 +126,7 @@ jobs:
             @override
             Widget build(BuildContext context) {
               return Scaffold(
-                appBar: AppBar(title: const Text('📋 سیستم تنظیم برنامه سیر قطار'), backgroundColor: Colors.black12, centerTitle: true),
+                appBar: AppBar(title: const Text('📋 سیستم تنظیم برنامه سیر قطار'), backgroundColor: Colors.black87, centerTitle: true),
                 body: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
@@ -171,12 +170,12 @@ jobs:
                                     child: ListTile(
                                       leading: CircleAvatar(
                                         backgroundColor: isGhadir ? Colors.blue.withOpacity(0.2) : Colors.amber.withOpacity(0.2),
-                                        child: Text(trip.type, style: TextStyle(color: isGhadir ? Colors.blue : Colors.amber, fontWeight: BallStyle().fontWeight)),
+                                        child: Text(trip.type, style: TextStyle(color: isGhadir ? Colors.blue : Colors.amber, fontWeight: FontWeight.bold)),
                                       ),
                                       title: Text(trip.rawLine, style: const TextStyle(fontSize: 14, letterSpacing: 1)),
                                       subtitle: Text(isGhadir ? 'مبدأ: غدیر 👈 مقصد: وکیل‌آباد' : 'مبدأ: وکیل‌آباد 👈 مقصد: غدیر', style: const TextStyle(color: Colors.white54, fontSize: 12)),
                                       trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.green),
-                                      onPressed: () {
+                                      onTap: () { // ⚡ اصلاح شد: تبدیل به onTap استاندارد فلاتر
                                         Navigator.push(
                                           context,
                                           MaterialPageRoute(builder: (context) => GraphScreen(trip: trip)),
@@ -194,24 +193,10 @@ jobs:
             }
           }
 
-          // تمدید متد کلیک لایف سناریو کارت
-          extension CardClick on Card {
-            Widget InkWellOnCard({required VoidCallback onPressed, required Widget child}) {
-              return InkWell(onTap: onPressed, child: child);
-            }
-          }
-          extension ListTileClick on ListTile {
-            void onPressed(VoidCallback action) {
-              // هدایت کلیک به سمت گراف صفحه بعد
-            }
-          }
-
-          // 📈 صفحه جدید تفصیلی برای ترسیم و نمایش جدول زمانی گراف
           class GraphScreen extends StatelessWidget {
             final TrainTrip trip;
             const GraphScreen({Key? key, required this.trip}) : super(key: key);
 
-            // محاسبه تجمعی ثانیه‌ها به زمان واقعی ساعت و دقیقه
             String _calculateStationTime(String startStr, int totalSecondsOffset) {
               List<String> parts = startStr.split(':');
               int hour = int.parse(parts[0]);
@@ -231,7 +216,6 @@ jobs:
             Widget build(BuildContext context) {
               bool isGhadir = trip.type == "S";
 
-              // ۱. داده‌های خام مسیر رفت (غدیر به وکیل‌آباد)
               final List<Map<String, dynamic>> ghadirToVakil = [
                 {"name": "غدیر (مبدأ)", "sec": 0},
                 {"name": "پروین اعتصامی", "sec": 152}, // 02:32
@@ -257,7 +241,6 @@ jobs:
                 {"name": "وکیل‌آباد (مقصد)", "sec": 2535}, // + 06:55
               ];
 
-              // ۲. داده‌های خام مسیر برگشت (وکیل‌آباد به غدیر)
               final List<Map<String, dynamic>> vakilToGhadir = [
                 {"name": "وکیل‌آباد (مبدأ)", "sec": 0},
                 {"name": "کوهستان پارک", "sec": 240},  // 04:00
@@ -280,157 +263,11 @@ jobs:
                 {"name": "بسیج", "sec": 2042},         // + 01:32
                 {"name": "۱۷ شهریور", "sec": 2122},    // + 01:20
                 {"name": "پروین اعتصامی", "sec": 2297}, // + 02:55
-                {"name": "غدیر (مقصد)", "sec": 2392},   // مجموع کل ثانیه‌ها
+                {"name": "غدیر (مقصد)", "sec": 2392},   
               ];
 
               final List<Map<String, dynamic>> activeRoute = isGhadir ? ghadirToVakil : vakilToGhadir;
 
               return Scaffold(
                 appBar: AppBar(
-                  title: Text(isGhadir ? '📈 گراف زمانی رفت (غدیر 👈 وکیل‌آباد)' : '📉 گراف زمانی برگشت (وکیل‌آباد 👈 غدیر)', style: const TextStyle(fontSize: 15)),
-                  backgroundColor: Colors.black25,
-                ),
-                body: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  child: Column(
-                    children: [
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(color: isGhadir ? Colors.blue.withOpacity(0.1) : Colors.amber.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                        child: Text('⏰ ساعت اعزام از مبدأ: ${trip.endTime} | زمان پایان سیر: ${trip.startTime}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: ListView.builder(
-                          itemCount: activeRoute.length,
-                          itemBuilder: (context, index) {
-                            final station = activeRoute[index];
-                            String realTime = _calculateStationTime(trip.endTime, station["sec"]);
-
-                            bool isTerminal = index == 0 || index == activeRoute.length - 1;
-
-                            return IntrinsicHeight(
-                              child: Row(
-                                children: [
-                                  // نمایش ساعت واقعی رسیدن به ایستگاه
-                                  SizedBox(
-                                    width: 85,
-                                    child: Text(realTime, style: TextStyle(fontWeight: isTerminal ? FontWeight.bold : FontWeight.normal, color: isTerminal ? Colors.green : Colors.white, fontSize: 14, letterSpacing: 0.5)),
-                                  ),
-                                  // طراحی ریل و گره گرافیکی ایستگاه
-                                  Column(
-                                    children: [
-                                      Container(
-                                        width: 14,
-                                        height: 14,
-                                        decoration: BoxDecoration(
-                                          color: isTerminal ? Colors.green : (isGhadir ? Colors.blue : Colors.amber),
-                                          shape: BoxShape.circle,
-                                          boxShadow: [BoxShadow(color: Colors.white10, blurRadius: 4)],
-                                        ),
-                                      ),
-                                      if (index != activeRoute.length - 1)
-                                        Expanded(
-                                          child: Container(width: 3, color: Colors.white24),
-                                        ),
-                                    ],
-                                  ),
-                                  const SizedBox(width: 15),
-                                  // نام ایستگاه
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                      child: Text(
-                                        station["name"],
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: isTerminal ? FontWeight.bold : FontWeight.normal,
-                                          color: isTerminal ? Colors.green : Colors.white90,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }
-          }
-          EOF
-
-          # ۲. تنظیم پکیج‌های سبک بدون کتابخانه‌های مزاحم اندروید
-          cat << 'EOF' > pubspec.yaml
-          name: train_alarm_app
-          description: "A graph visualization project for train drivers."
-          publish_to: 'none'
-          version: 1.0.0+1
-          environment:
-            sdk: '>=3.0.0 <4.0.0'
-          dependencies:
-            flutter:
-              sdk: flutter
-            cupertino_icons: ^1.0.8
-            shared_preferences: ^2.2.3
-          dev_dependencies:
-            flutter_test:
-              sdk: flutter
-            flutter_lints: ^3.0.0
-          flutter:
-            uses-material-design: true
-          EOF
-
-          # ۳. مانیفست ساده بدون دسترسی‌های سنگین
-          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          sed -i 's/android:label=".*"/android:label="گراف سیر راهبران"/' $MANIFEST_PATH
-
-          # ۴. تنظیمات کامل build.gradle.kts
-          cat << 'EOF' > android/app/build.gradle.kts
-          plugins {
-              id("com.android.application")
-              id("kotlin-android")
-              id("dev.flutter.flutter-gradle-plugin")
-          }
-
-          android {
-              namespace = "com.example.train_alarm_app"
-              compileSdk = flutter.compileSdkVersion
-
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-
-              defaultConfig {
-                  applicationId = "com.example.train_alarm_app"
-                  minSdk = 21
-                  targetSdk = flutter.targetSdkVersion
-                  versionCode = flutter.versionCode
-                  versionName = flutter.versionName
-              }
-
-              buildTypes {
-                  release {
-                      signingConfig = signingConfigs.getByName("debug")
-                  }
-              }
-          }
-          EOF
-
-      - name: Get Packages
-        run: flutter pub get
-        
-      - name: Build Release APK
-        run: flutter build apk --release
-        
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-apk
-          path: "**/app-release.apk"
+                  title: Text(isGhadir ? '📈 گراف زمانی رفت (غدیر 👈
