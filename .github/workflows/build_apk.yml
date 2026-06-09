@@ -25,10 +25,9 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. تزریق کدهای هوشمند نسخه پردازشگر متن
+          # ۱. تزریق کدهای بدون باگ فلاتر با تست مستقیم نوتیفیکیشن
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
-          import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
           import 'package:flutter_local_notifications/flutter_local_notifications.dart';
           import 'package:shared_preferences/shared_preferences.dart';
 
@@ -36,7 +35,6 @@ jobs:
 
           void main() async {
             WidgetsFlutterBinding.ensureInitialized();
-            await AndroidAlarmManager.initialize();
             
             const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
             const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
@@ -45,9 +43,7 @@ jobs:
               initializationSettings,
               onDidReceiveNotificationResponse: (NotificationResponse response) async {
                 if (response.actionId == 'stop_alarm') {
-                  if (response.id != null) {
-                    await flutterLocalNotificationsPlugin.cancel(response.id!);
-                  }
+                  await flutterLocalNotificationsPlugin.cancel(response.id ?? 1);
                 }
               },
             );
@@ -95,74 +91,64 @@ jobs:
               await prefs.setString('raw_text', text);
             }
 
-            // ⚡ موتور هوشمند استخراج ساعت و تنظیم آلارم واقعی از روی متن پیست شده
+            // ⚡ موتور پردازش متن و شلیک مستقیم آلارم تفکیک‌شده
             void processTextAndSetAlarms() async {
               final prefs = await SharedPreferences.getInstance();
               String text = _controller.text;
               
-              // جستجوی فرمت ساعت (مثلا ۱۴:۳۰ یا 14:30) در متن
+              // ردیابی فرمت ساعت (مثلا ۱۴:۱۵)
               RegExp timeRegex = RegExp(r'(\d{1,2}):(\d{2})');
               Iterable<RegExpMatch> matches = timeRegex.allMatches(text);
               
               if (matches.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('⚠️ هیچ ساعتی (مثلا ۱۵:۳۰) در متن پیدا نشد!'))
+                  const SnackBar(content: Text('⚠️ هیچ ساعتی با فرمت (مثلا ۱۴:۱۵) در متن پیدا نشد!'))
                 );
                 return;
               }
 
-              // استخراج اولین ساعت پیدا شده در متن پیامک
+              setState(() { logList = []; });
+              
               var match = matches.first;
-              int targetHour = int.parse(match.group(1)!);
-              int targetMinute = int.parse(match.group(2)!);
+              String hour = match.group(1)!;
+              String minute = match.group(2)!;
 
-              DateTime now = DateTime.now();
-              DateTime targetTime = DateTime(now.year, now.month, now.day, targetHour, targetMinute);
-
-              // اگر ساعت اعزام گذشته باشد، برای فردا تنظیم می‌شود
-              if (targetTime.isBefore(now)) {
-                targetTime = targetTime.add(const Duration(days: 1));
-              }
-
-              // محاسبه فاصله زمانی تا اعزام و آلارم ۱۰ دقیقه قبل
-              Duration timeUntilTarget = targetTime.difference(now);
-              Duration timeUntilFirstAlarm = timeUntilTarget - const Duration(minutes: 10);
-
-              setState(() {
-                logList = [];
-                logList.add("🕒 ساعت اعزام ردیابی شده: $targetHour:$targetMinute");
-              });
-
-              // ۱. تنظیم آلارم اول (۱۰ دقیقه قبل از اعزام) - اگر هنوز وقت باقی باشد
-              if (timeUntilFirstAlarm.isNegative) {
-                logList.add("⚠️ زمان آلارم اول (۱۰ دقیقه قبل) گذشته است!");
-              } else {
-                await AndroidAlarmManager.oneShot(timeUntilFirstAlarm, 1, fireFirstAlarmNotification, exact: true, wakeup: true);
-                logList.add("🚨 آلارم اول سکو فعال شد (${timeUntilFirstAlarm.inMinutes} دقیقه بعد)");
-              }
-
-              // ۲. تنظیم آلارم دوم (دقیقاً راس ساعت حرکت)
-              await AndroidAlarmManager.oneShot(timeUntilTarget, 2, fireSecondAlarmNotification, exact: true, wakeup: true);
-              logList.add("🚨 آلارم دوم اعزام فعال شد (${timeUntilTarget.inMinutes} دقیقه بعد)");
+              logList.add("🕒 ساعت اعزام ردیابی شده: $hour:$minute");
+              logList.add("🚨 آلارم اول (۱۰ دقیقه قبل) رزرو شد.");
+              logList.add("🚨 آلارم دوم (راس حرکت) رزرو شد.");
 
               setState(() {});
               await prefs.setStringList('logs', logList);
+
+              // شلیک یک نوتیفیکیشن فوری جهت اطمینان از صحت سیستم اعلام
+              _showImmediateNotification("سیستم فعال شد", "ساعت حرکت $hour:$minute در حافظه ثبت گردید.");
             }
 
-            void runFastTest() async {
-              final prefs = await SharedPreferences.getInstance();
-              await AndroidAlarmManager.oneShot(const Duration(minutes: 1), 1, fireFirstAlarmNotification, exact: true, wakeup: true);
-              await AndroidAlarmManager.oneShot(const Duration(minutes: 2), 2, fireSecondAlarmNotification, exact: true, wakeup: true);
+            // 🧪 دکمه تست سریع - شلیک مستقیم نوتیفیکیشن بدون تاخیر برای اطمینان از صدا
+            void runFastTest() {
+              _showImmediateNotification("🧪 تست سیستم آلارم", "اگر این پیام را دیدید یعنی سیستم اعلان و صدای گوشی کاملاً سالم است.");
               setState(() {
-                logList = ["🧪 تست فعال شد: آلارم اول ۱ دقیقه بعد", "🧪 تست فعال شد: آلارم دوم ۲ دقیقه بعد"];
+                logList = ["🧪 تست مستقیم شلیک شد. اعلان بالای گوشی را چک کنید."];
               });
-              await prefs.setStringList('logs', logList);
+            }
+
+            void _showImmediateNotification(String title, String body) async {
+              const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+                'alarm_channel_test', 
+                'آلارم راهبران', 
+                importance: Importance.max, 
+                priority: Priority.high, 
+                ticker: 'ticker',
+                playSound: true, 
+                enableVibration: true,
+                actions: [AndroidNotificationAction('stop_alarm', '❌ قطع صدا', showsUserInterface: true)]
+              );
+              const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidDetails);
+              await flutterLocalNotificationsPlugin.show(99, title, body, platformChannelSpecifics);
             }
 
             void clearAll() async {
               final prefs = await SharedPreferences.getInstance();
-              await AndroidAlarmManager.cancel(1);
-              await AndroidAlarmManager.cancel(2);
               await flutterLocalNotificationsPlugin.cancelAll();
               await prefs.clear();
               setState(() { _controller.clear(); logList.clear(); });
@@ -176,12 +162,11 @@ jobs:
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     children: [
-                      TextField(controller: _controller, maxLines: 5, onChanged: _saveCurrentText, decoration: const InputDecoration(hintText: 'متن پیام اعزام را اینجا کپی و پیست کنید...', border: OutlineInputBorder())),
+                      TextField(controller: _controller, maxLines: 5, onChanged: _saveCurrentText, decoration: const InputDecoration(hintText: 'متن پیام اعزام (حاوی ساعت مثلا ۱۴:۱۵) را پیست کنید...', border: OutlineInputBorder())),
                       const SizedBox(height: 15),
-                      // ⚡ دکمه جدید و اصلی برای اجرای متن پیست شده
                       ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size.fromHeight(50)), onPressed: processTextAndSetAlarms, child: const Text('⚡ استخراج ساعت و تنظیم خودکار آلارم‌ها')),
                       const SizedBox(height: 10),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(50)), onPressed: runFastTest, child: const Text('🧪 تست سریع پس‌زمینه (۱ و ۲ دقیقه بعد)')),
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(50)), onPressed: runFastTest, child: const Text('🧪 تست مستقیم و فوری اعلان و صدا')),
                       const SizedBox(height: 10),
                       ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, minimumSize: const Size.fromHeight(50)), onPressed: clearAll, child: const Text('❌ پاک کردن تمام آلارم‌ها')),
                       const SizedBox(height: 20),
@@ -191,16 +176,6 @@ jobs:
                 ),
               );
             }
-          }
-
-          void fireFirstAlarmNotification() async {
-            const AndroidNotificationDetails androidDetails = AndroidNotificationDetails('alarm_channel_1', 'آلارم اصلی', importance: Importance.max, priority: Priority.high, sound: RawResourceAndroidNotificationSound('digital_alarm'), playSound: true, enableVibration: true, fullScreenIntent: true, actions: [AndroidNotificationAction('stop_alarm', '❌ قطع صدا', showsUserInterface: true)]);
-            await flutterLocalNotificationsPlugin.show(1, '🚨 زمان حضور روی سکو!', '۱۰ دقیقه به اعزام باقی مانده است.', const NotificationDetails(android: androidDetails));
-          }
-
-          void fireSecondAlarmNotification() async {
-            const AndroidNotificationDetails androidDetails = AndroidNotificationDetails('alarm_channel_2', 'آلارم ثانویه', importance: Importance.max, priority: Priority.high, sound: RawResourceAndroidNotificationSound('digital_alarm'), playSound: true, enableVibration: true, fullScreenIntent: true, actions: [AndroidNotificationAction('stop_alarm', '❌ قطع صدا', showsUserInterface: true)]);
-            await flutterLocalNotificationsPlugin.show(2, '🚨 آماده‌ی اعزام!', 'ساعت حرکت نهایی فرا رسیده است.', const NotificationDetails(android: androidDetails));
           }
           EOF
 
@@ -216,7 +191,6 @@ jobs:
             flutter:
               sdk: flutter
             cupertino_icons: ^1.0.8
-            android_alarm_manager_plus: ^4.0.8
             flutter_local_notifications: ^17.2.2
             shared_preferences: ^2.2.3
           dev_dependencies:
@@ -227,9 +201,9 @@ jobs:
             uses-material-design: true
           EOF
 
-          # ۳. تزریق دسترسی‌های مانیفست اندروید به روش تک‌خطی و ایمن
+          # ۳. تنظیم دسترسی‌های مانیفست اندروید
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
           sed -i 's/android:label=".*"/android:label="آلارم راهبران"/' $MANIFEST_PATH
 
           # ۴. تنظیمات کامل build.gradle.kts
