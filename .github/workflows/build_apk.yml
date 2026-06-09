@@ -25,22 +25,23 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. کدهای فلاتر مجهز به موتور آلارم پس‌زمینه با رفع باگ کامپایل فلاتر
+          # ۱. کدهای فلاتر مجهز به محاسبه و نمایش زمان باقی‌مانده جلوی هر آلارم
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
           import 'package:flutter_local_notifications/flutter_local_notifications.dart';
           import 'package:shared_preferences/shared_preferences.dart';
+          import 'dart:async';
 
           final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
-          // تابع پس‌زمینه آلارم بومی اندروید
           @pragma('vm:entry-point')
           void fireAlarmCallback(int id) async {
+            WidgetsFlutterBinding.ensureInitialized();
             const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-              'train_hardware_alarm_v4',
-              'آلارم بومی راهبران',
-              channelDescription: 'اعلان‌های حیاتی حرکت قطار برای راهبران',
+              'train_hardware_channel_v7',
+              'آلارم‌های اصلی راهبران',
+              channelDescription: 'اعلان‌های حیاتی حرکت و حضور روی سکو',
               importance: Importance.max,
               priority: Priority.high,
               playSound: true,
@@ -61,6 +62,19 @@ jobs:
             const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
             const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
             await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+            final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+                flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+            if (androidImplementation != null) {
+              await androidImplementation.createNotificationChannel(const AndroidNotificationChannel(
+                'train_hardware_channel_v7',
+                'آلارم‌های اصلی راهبران',
+                description: 'اعلان‌های حیاتی حرکت و حضور روی سکو',
+                importance: Importance.max,
+                playSound: true,
+                enableVibration: true,
+              ));
+            }
 
             runApp(const TrainAlarmApp());
           }
@@ -85,34 +99,98 @@ jobs:
 
           class _MainAlarmScreenState extends State<MainAlarmScreen> {
             final TextEditingController _controller = TextEditingController();
-            List<String> logList = [];
+            List<String> rawAlarmsData = []; // ذخیره اطلاعات خام آلارم‌ها برای محاسبه زنده
+            List<String> displayLogs = [];
+            Timer? _uiTimer;
 
             @override
             void initState() {
               super.initState();
               _loadSavedData();
+              // راه‌اندازی تایمر هر ۱ دقیقه یک‌بار برای به‌روزرسانی خودکار زمان‌های باقی‌مانده در لیست
+              _uiTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+                _updateRemainingTimesDisplay();
+              });
+            }
+
+            @override
+            void dispose() {
+              _uiTimer?.cancel();
+              super.dispose();
             }
 
             void _loadSavedData() async {
               final prefs = await SharedPreferences.getInstance();
               setState(() {
                 _controller.text = prefs.getString('raw_text') ?? '';
-                logList = prefs.getStringList('logs') ?? [];
+                rawAlarmsData = prefs.getStringList('raw_alarms_data') ?? [];
               });
+              _updateRemainingTimesDisplay();
             }
 
-            void _saveCurrentText(String text) async {
+            void _saveData(String text, List<String> alarms) async {
               final prefs = await SharedPreferences.getInstance();
               await prefs.setString('raw_text', text);
+              await prefs.setStringList('raw_alarms_data', alarms);
+            }
+
+            // 🔄 تابع جادویی برای محاسبه زنده زمان باقی‌مانده و به‌روزرسانی لیست
+            void _updateRemainingTimesDisplay() {
+              if (rawAlarmsData.isEmpty) {
+                setState(() { displayLogs = []; });
+                return;
+              }
+
+              List<String> updatedLogs = [];
+              DateTime now = DateTime.now();
+
+              for (String alarmInfo in rawAlarmsData) {
+                // فرمت ذخیره شده: TYPE|HOUR|MINUTE
+                List<String> parts = alarmInfo.split('|');
+                if (parts.length < 3) continue;
+
+                String type = parts[0];
+                int h = int.parse(parts[1]);
+                int m = int.parse(parts[2]);
+
+                DateTime alarmTime = DateTime(now.year, now.month, now.day, h, m);
+                if (alarmTime.isBefore(now)) {
+                  alarmTime = alarmTime.add(const Duration(days: 1));
+                }
+
+                Duration difference = alarmTime.difference(now);
+                int remainingMinutes = difference.inMinutes;
+                int remainingHours = difference.inHours;
+
+                String timeString = "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}";
+                String remainingText = "";
+
+                if (remainingMinutes <= 0) {
+                  remainingText = "✅ زمانش فرا رسید / گذشت";
+                } else if (remainingHours > 0) {
+                  remainingText = "⏳ (${remainingHours} ساعت و ${remainingMinutes % 60} دقیقه مانده)";
+                } else {
+                  remainingText = "⏳ (${remainingMinutes} دقیقه مانده)";
+                }
+
+                if (type == "HEAD") {
+                  updatedLogs.add("📌 خط زمان: $timeString");
+                } else if (type == "PLATFORM") {
+                  updatedLogs.add("  🔹 آلارم سکو ساعت $timeString  $remainingText");
+                } else if (type == "MOVE") {
+                  updatedLogs.add("  🔸 آلارم حرکت ساعت $timeString  $remainingText");
+                }
+              }
+
+              setState(() { displayLogs = updatedLogs; });
             }
 
             void processTextAndSetAlarms() async {
-              final prefs = await SharedPreferences.getInstance();
               String text = _controller.text;
               List<String> lines = text.split('\n');
               
-              List<String> newLogs = [];
-              RegExp timeRegex = RegExp(r'(\d{2}):(\d{2})');
+              List<String> newRawData = [];
+              RegExp timeRegex = RegExp(r'(\d{1,2}):(\d{2})');
               DateTime now = DateTime.now();
 
               int alarmIdCounter = 1;
@@ -136,57 +214,61 @@ jobs:
 
                   DateTime firstAlarmTime = time1.subtract(const Duration(minutes: 10));
 
-                  newLogs.add("📌 خط زمان: $h1:$m1 تا $h2:$m2");
+                  // ذخیره اطلاعات خط اصلی
+                  newRawData.add("HEAD|$h1|$m1");
 
+                  // تنظیم و ذخیره آلارم اول (سکو)
                   if (firstAlarmTime.isAfter(now)) {
                     int id1 = alarmIdCounter;
-                    await AndroidAlarmManager.oneShotAt(firstAlarmTime, id1, fireAlarmCallback, exact: true, wakeup: true);
-                    newLogs.add("  🔹 آلارم سکو برای ساعت ${firstAlarmTime.hour}:${firstAlarmTime.minute} تنظیم شد.");
+                    Duration duration1 = firstAlarmTime.difference(now);
+                    await AndroidAlarmManager.oneShot(duration1, id1, fireAlarmCallback, exact: true, wakeup: true);
+                    newRawData.add("PLATFORM|${firstAlarmTime.hour}|${firstAlarmTime.minute}");
                   } else {
-                    newLogs.add("  ⚠️ زمان آلارم سکو (۱۰ دقیقه قبل) گذشته است!");
+                    newRawData.add("PLATFORM|${firstAlarmTime.hour}|${firstAlarmTime.minute}");
                   }
 
+                  // تنظیم و ذخیره آلارم دوم (حرکت)
                   int id2 = alarmIdCounter + 1;
-                  await AndroidAlarmManager.oneShotAt(time2, id2, fireAlarmCallback, exact: true, wakeup: true);
-                  newLogs.add("  🔸 آلارم حرکت برای ساعت $h2:$m2 تنظیم شد.");
+                  Duration duration2 = time2.difference(now);
+                  await AndroidAlarmManager.oneShot(duration2, id2, fireAlarmCallback, exact: true, wakeup: true);
+                  newRawData.add("MOVE|${time2.hour}|${time2.minute}");
                   
                   alarmIdCounter += 2;
                 }
               }
 
-              if (newLogs.isEmpty) {
+              if (newRawData.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('⚠️ هیچ خط زمانی معتبری یافت نشد!'))
                 );
                 return;
               }
 
-              setState(() { logList = newLogs; });
-              await prefs.setStringList('logs', logList);
+              rawAlarmsData = newRawData;
+              _saveData(text, rawAlarmsData);
+              _updateRemainingTimesDisplay();
               
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(backgroundColor: Colors.green, content: Text('✅ آلارم‌های سخت‌افزاری با موفقیت در پس‌زمینه اندروید رزرو شدند.'))
+                const SnackBar(backgroundColor: Colors.green, content: Text('✅ آلارم‌ها با موفقیت رزرو و تایمرها فعال شدند.'))
               );
             }
 
             void runFastTest() async {
-              DateTime testTime = DateTime.now().add(const Duration(minutes: 1));
-              await AndroidAlarmManager.oneShotAt(testTime, 999, fireAlarmCallback, exact: true, wakeup: true);
-              
+              await AndroidAlarmManager.oneShot(const Duration(seconds: 5), 888, fireAlarmCallback, exact: true, wakeup: true);
               setState(() {
-                logList = ["🧪 تست سخت‌افزاری فعال شد: آلارم آزمایشی دقیقاً ۱ دقیقه دیگر شلیک می‌شود. گوشی را قفل کنید و منتظر بمانید."];
+                displayLogs = ["🧪 تست فعال شد: آلارم آزمایشی ۵ ثانیه دیگر شلیک می‌شود. (برنامه باز بماند)"];
               });
             }
 
             void clearAll() async {
               final prefs = await SharedPreferences.getInstance();
               await flutterLocalNotificationsPlugin.cancelAll();
-              for (int i = 1; i < 50; i++) {
+              for (int i = 1; i < 100; i++) {
                 await AndroidAlarmManager.cancel(i);
               }
-              await AndroidAlarmManager.cancel(999);
+              await AndroidAlarmManager.cancel(888);
               await prefs.clear();
-              setState(() { _controller.clear(); logList.clear(); });
+              setState(() { _controller.clear(); rawAlarmsData.clear(); displayLogs.clear(); });
             }
 
             @override
@@ -197,111 +279,10 @@ jobs:
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     children: [
-                      TextField(controller: _controller, maxLines: 5, onChanged: _saveCurrentText, style: const TextStyle(fontSize: 15), decoration: const InputDecoration(hintText: 'متن پیام اعزام روزانه را پیست کنید...', border: OutlineInputBorder())),
+                      TextField(controller: _controller, maxLines: 5, onChanged: (text) => _saveData(text, rawAlarmsData), style: const TextStyle(fontSize: 15), decoration: const InputDecoration(hintText: 'متن پیام اعزام روزانه را پیست کنید...', border: OutlineInputBorder())),
                       const SizedBox(height: 12),
                       ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size.fromHeight(48)), onPressed: processTextAndSetAlarms, child: const Text('⚡ استخراج ساعت و تنظیم خودکار آلارم‌ها')),
                       const SizedBox(height: 8),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)), onPressed: runFastTest, child: const Text('🧪 تست آلارم سخت‌افزاری (۱ دقیقه بعد)')),
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)), onPressed: runFastTest, child: const Text('🧪 تست آلارم سریع (۵ ثانیه بعد)')),
                       const SizedBox(height: 8),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, minimumSize: const Size.fromHeight(48)), onPressed: clearAll, child: const Text('❌ پاک کردن تمام آلارم‌ها')),
-                      const SizedBox(height: 15),
-                      Expanded(child: logList.isEmpty ? const Center(child: Text('هیچ آلارم فعالی وجود ندارد')) : ListView.builder(itemCount: logList.length, itemBuilder: (context, index) {
-                        bool isHeader = logList[index].startsWith('📌');
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(isHeader ? Icons.timelapse : Icons.alarm, color: isHeader ? Colors.green : Colors.amber),
-                          title: Text(logList[index], style: TextStyle(fontSize: 14, fontWeight: isHeader ? FontWeight.bold : FontWeight.normal)),
-                        );
-                      }))
-                    ],
-                  ),
-                ),
-              );
-            }
-          }
-          EOF
-
-          # ۲. ساخت فایل پکیج‌ها
-          cat << 'EOF' > pubspec.yaml
-          name: train_alarm_app
-          description: "A new Flutter project for train drivers."
-          publish_to: 'none'
-          version: 1.0.0+1
-          environment:
-            sdk: '>=3.0.0 <4.0.0'
-          dependencies:
-            flutter:
-              sdk: flutter
-            cupertino_icons: ^1.0.8
-            android_alarm_manager_plus: ^4.0.8
-            flutter_local_notifications: ^17.2.2
-            shared_preferences: ^2.2.3
-          dev_dependencies:
-            flutter_test:
-              sdk: flutter
-            flutter_lints: ^3.0.0
-          flutter:
-            uses-material-design: true
-          EOF
-
-          # ۳. تنظیم دسترسی‌های مانیفست اندروید
-          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
-          sed -i '/<activity/i \        <service android:name="dev.fluttercommunity.androidalarmmanager.AlarmService" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />\n        <receiver android:name="dev.fluttercommunity.androidalarmmanager.AlarmBroadcastReceiver" android:exported="false" />\n        <receiver android:name="dev.fluttercommunity.androidalarmmanager.RebootBroadcastReceiver" android:exported="false">\n            <intent-filter>\n                <action android:name="android.intent.action.BOOT_COMPLETED" />\n            </intent-filter>\n        </receiver>' $MANIFEST_PATH
-          sed -i 's/android:label=".*"/android:label="آلارم راهبران"/' $MANIFEST_PATH
-
-          # ۴. تنظیمات کامل build.gradle.kts
-          cat << 'EOF' > android/app/build.gradle.kts
-          plugins {
-              id("com.android.application")
-              id("kotlin-android")
-              id("dev.flutter.flutter-gradle-plugin")
-          }
-
-          android {
-              namespace = "com.example.train_alarm_app"
-              compileSdk = flutter.compileSdkVersion
-
-              compileOptions {
-                  isCoreLibraryDesugaringEnabled = true
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-
-              defaultConfig {
-                  applicationId = "com.example.train_alarm_app"
-                  minSdk = 21
-                  targetSdk = flutter.targetSdkVersion
-                  versionCode = flutter.versionCode
-                  versionName = flutter.versionName
-              }
-
-              buildTypes {
-                  release {
-                      signingConfig = signingConfigs.getByName("debug")
-                  }
-              }
-          }
-
-          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-              compilerOptions {
-                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-              }
-          }
-
-          dependencies {
-              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
-          }
-          EOF
-
-      - name: Get Packages
-        run: flutter pub get
-        
-      - name: Build Release APK
-        run: flutter build apk --release
-        
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, minimumSize: const Size.fromHeight(4
