@@ -22,7 +22,7 @@ jobs:
 
       - name: Auto Create and Repair Project
         run: |
-          rm -rf lib pubspec.yaml android
+          rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
           # ۱. تزریق کدهای اختصاصی شما
@@ -205,9 +205,9 @@ jobs:
           </manifest>
           EOF
 
-          # ۴. حل مشکل Desugaring با دستکاری خودکار فایل build.gradle اندروید
-          sed -i '/android {/a \    compileOptions {\n        coreLibraryDesugaringEnabled true\n        sourceCompatibility JavaVersion.VERSION_1_8\n        targetCompatibility JavaVersion.VERSION_1_8\n    }' android/app/build.gradle
-          sed -i '/dependencies {/a \    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"' android/app/build.gradle
+          # ۴. حل مشکل Desugaring با فرمت کدهای جدید build.gradle.kts (نسخه‌های جدید فلاتر)
+          sed -i '/android {/a \    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility = JavaVersion.VERSION_1_8\n        targetCompatibility = JavaVersion.VERSION_1_8\n    }' android/app/build.gradle.kts
+          sed -i '/dependencies {/a \    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")' android/app/build.gradle.kts
 
       - name: Get Packages
         run: flutter pub get
