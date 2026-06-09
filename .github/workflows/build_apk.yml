@@ -25,286 +25,338 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. کدهای فلاتر مجهز به سیستم بیدارباش سخت‌افزاری و شلیک در تمام حالات
+          # ۱. کدهای فلاتر متمرکز بر سیستم سیر و نمودار گراف قطار
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
-          import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
-          import 'package:flutter_local_notifications/flutter_local_notifications.dart';
           import 'package:shared_preferences/shared_preferences.dart';
-          import 'dart:async';
 
-          final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-
-          // تنظیمات فوق امنیتی اعلان برای بوق زدن در حالت قفل، خواب و برنامه باز
-          const AndroidNotificationDetails hardwareAlarmDetails = AndroidNotificationDetails(
-            'train_heavy_hardware_channel_v10',
-            '📢 هشدار حیاتی راهبران (سخت‌افزاری)',
-            channelDescription: 'شلیک زنگ در حالت باز، بسته، قفل و خواب عمیق گوشی',
-            importance: Importance.max,
-            priority: Priority.high,
-            audioAttributesUsage: AudioAttributesUsage.alarm, // معرفی به عنوان آلارم رسمی سیستم
-            category: AndroidNotificationCategory.alarm,
-            playSound: true,
-            enableVibration: true,
-            fullScreenIntent: true, // اجازه میانبر روی صفحه قفل
-          );
-          const NotificationDetails platformChannelSpecifics = NotificationDetails(android: hardwareAlarmDetails);
-
-          // این تابع مستقیم توسط هسته اندروید (حتی در خواب عمیق) اجرا می‌شود
-          @pragma('vm:entry-point')
-          void fireAlarmCallback(int id) async {
+          void main() {
             WidgetsFlutterBinding.ensureInitialized();
-            String title = (id % 2 == 1) ? "🚨 زمان حضور روی سکو!" : "🚨 آماده‌ی اعزام و حرکت!";
-            String body = (id % 2 == 1) ? "۱۰ دقیقه به زمان شروع باقی مانده است." : "ساعت حرکت نهایی فرا رسیده است.";
-            await flutterLocalNotificationsPlugin.show(id, title, body, platformChannelSpecifics);
+            runApp(const TrainGraphApp());
           }
 
-          void main() async {
-            WidgetsFlutterBinding.ensureInitialized();
-            await AndroidAlarmManager.initialize();
-            
-            const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
-            const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
-            await flutterLocalNotificationsPlugin.initialize(initializationSettings);
-
-            // ثبت رسمی کانال آلارم سخت‌افزاری در سیستم‌عامل
-            final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
-                flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-            if (androidImplementation != null) {
-              await androidImplementation.createNotificationChannel(const AndroidNotificationChannel(
-                'train_heavy_hardware_channel_v10',
-                '📢 هشدار حیاتی راهبران (سخت‌افزاری)',
-                description: 'شلیک زنگ در حالت باز، بسته، قفل و خواب عمیق گوشی',
-                importance: Importance.max,
-                playSound: true,
-                enableVibration: true,
-                enableLights: true,
-                audioAttributesUsage: AudioAttributesUsage.alarm,
-              ));
-            }
-
-            runApp(const TrainAlarmApp());
-          }
-
-          class TrainAlarmApp extends StatelessWidget {
-            const TrainAlarmApp({Key? key}) : super(key: key);
+          class TrainGraphApp extends StatelessWidget {
+            const TrainGraphApp({Key? key}) : super(key: key);
             @override
             Widget build(BuildContext context) {
               return MaterialApp(
                 debugShowCheckedModeBanner: false,
-                home: const MainAlarmScreen(),
-                theme: ThemeData.dark(),
+                title: 'نمودار سیر راهبران',
+                theme: ThemeData.dark().copyWith(
+                  scaffoldBackgroundColor: const Color(0xFF121212),
+                  primaryColor: Colors.green,
+                ),
+                home: const HomeScreen(),
               );
             }
           }
 
-          class MainAlarmScreen extends StatefulWidget {
-            const MainAlarmScreen({Key? key}) : super(key: key);
-            @override
-            State<MainAlarmScreen> createState() => _MainAlarmScreenState();
+          // مدل داده‌ای برای ذخیره هر خط سیر
+          class TrainTrip {
+            final String rawLine;
+            final String type; // S or E
+            final String startTime;
+            final String endTime;
+            TrainTrip({required this.rawLine, required this.type, required this.startTime, required this.endTime});
           }
 
-          class _MainAlarmScreenState extends State<MainAlarmScreen> {
+          class HomeScreen extends StatefulWidget {
+            const HomeScreen({Key? key}) : super(key: key);
+            @override
+            State<HomeScreen> createState() => _HomeScreenState();
+          }
+
+          class _HomeScreenState extends State<HomeScreen> {
             final TextEditingController _controller = TextEditingController();
-            List<String> rawAlarmsData = [];
-            List<String> displayLogs = [];
-            Timer? _uiTimer;
-            Timer? _liveScreenChecker;
+            List<TrainTrip> trips = [];
 
             @override
             void initState() {
               super.initState();
-              _loadSavedData();
-              
-              // تایمر معکوس برای نوشته‌های داخل لیست
-              _uiTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
-                _updateRemainingTimesDisplay();
-              });
-
-              // چک کردن ثانیه‌ای برای زمانی که خود برنامه باز است و صفحه روشن است
-              _liveScreenChecker = Timer.periodic(const Duration(seconds: 1), (timer) {
-                _triggerIfProgramIsActiveAndOpen();
-              });
+              _loadSavedText();
             }
 
-            @override
-            void dispose() {
-              _uiTimer?.cancel();
-              _liveScreenChecker?.cancel();
-              super.dispose();
-            }
-
-            void _loadSavedData() async {
+            void _loadSavedText() async {
               final prefs = await SharedPreferences.getInstance();
               setState(() {
-                _controller.text = prefs.getString('raw_text') ?? '';
-                rawAlarmsData = prefs.getStringList('raw_alarms_data') ?? [];
-              });
-              _updateRemainingTimesDisplay();
-            }
-
-            void _saveData(String text, List<String> alarms) async {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setString('raw_text', text);
-              await prefs.setStringList('raw_alarms_data', alarms);
-            }
-
-            void _updateRemainingTimesDisplay() {
-              if (rawAlarmsData.isEmpty) {
-                setState(() { displayLogs = []; });
-                return;
-              }
-              List<String> updatedLogs = [];
-              DateTime now = DateTime.now();
-
-              for (String alarmInfo in rawAlarmsData) {
-                List<String> parts = alarmInfo.split('|');
-                if (parts.length < 3) continue;
-
-                String type = parts[0];
-                int h = int.parse(parts[1]);
-                int m = int.parse(parts[2]);
-
-                DateTime alarmTime = DateTime(now.year, now.month, now.day, h, m);
-                if (alarmTime.isBefore(now)) alarmTime = alarmTime.add(const Duration(days: 1));
-
-                Duration difference = alarmTime.difference(now);
-                int remainingMinutes = difference.inMinutes;
-
-                String timeString = "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}";
-                String remainingText = remainingMinutes <= 0 ? "✅ گذشت" : "⏳ ($remainingMinutes دقیقه مانده)";
-
-                if (type == "HEAD") updatedLogs.add("📌 خط زمان: $timeString");
-                if (type == "PLATFORM") updatedLogs.add("  🔹 آلارم سکو ساعت $timeString  $remainingText");
-                if (type == "MOVE") updatedLogs.add("  🔸 آلارم حرکت ساعت $timeString  $remainingText");
-              }
-              setState(() { displayLogs = updatedLogs; });
-            }
-
-            // شلیک فوری نوتیفیکیشن در حالت برنامه باز (پیش‌زمینه)
-            void _triggerIfProgramIsActiveAndOpen() {
-              if (rawAlarmsData.isEmpty) return;
-              DateTime now = DateTime.now();
-
-              for (String alarmInfo in rawAlarmsData) {
-                List<String> parts = alarmInfo.split('|');
-                if (parts.length < 3 || parts[0] == "HEAD") continue;
-
-                String type = parts[0];
-                int h = int.parse(parts[1]);
-                int m = int.parse(parts[2]);
-
-                if (now.hour == h && now.minute == m && now.second == 0) {
-                  String title = (type == "PLATFORM") ? "🚨 زمان حضور روی سکو!" : "🚨 آماده‌ی اعزام و حرکت!";
-                  String body = (type == "PLATFORM") ? "۱۰ دقیقه به زمان شروع باقی مانده است." : "ساعت حرکت نهایی فرا رسیده است.";
-                  flutterLocalNotificationsPlugin.show(h + m + 7, title, body, platformChannelSpecifics);
+                _controller.text = prefs.getString('raw_schedule_text') ?? '';
+                if (_controller.text.isNotEmpty) {
+                  _parseText(_controller.text);
                 }
-              }
+              });
             }
 
-            void processTextAndSetAlarms() async {
-              String text = _controller.text;
-              List<String> lines = text.split('\n');
-              List<String> newRawData = [];
-              RegExp timeRegex = RegExp(r'(\d{1,2}):(\d{2})');
-              DateTime now = DateTime.now();
+            void _saveText(String text) async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('raw_schedule_text', text);
+            }
 
-              int alarmIdCounter = 1;
-              await flutterLocalNotificationsPlugin.cancelAll();
+            void _parseText(String text) {
+              List<TrainTrip> parsedTrips = [];
+              List<String> lines = text.split('\n');
+              RegExp timeRegex = RegExp(r'(\d{2}):(\d{2})');
 
               for (String line in lines) {
-                if (line.trim().isEmpty) continue;
-                Iterable<RegExpMatch> matches = timeRegex.allMatches(line);
-                
-                if (matches.length >= 2) {
-                  int h1 = int.parse(matches.elementAt(0).group(1)!);
-                  int m1 = int.parse(matches.elementAt(0).group(2)!);
-                  int h2 = int.parse(matches.elementAt(1).group(1)!);
-                  int m2 = int.parse(matches.elementAt(1).group(2)!);
+                String cleanLine = line.trim();
+                if (cleanLine.isEmpty) continue;
 
-                  DateTime time1 = DateTime(now.year, now.month, now.day, h1, m1);
-                  DateTime time2 = DateTime(now.year, now.month, now.day, h2, m2);
+                String type = "";
+                if (cleanLine.startsWith("S") || cleanLine.startsWith("s")) type = "S";
+                if (cleanLine.startsWith("E") || cleanLine.startsWith("e")) type = "E";
 
-                  if (time1.isBefore(now)) time1 = time1.add(const Duration(days: 1));
-                  if (time2.isBefore(now)) time2 = time2.add(const Duration(days: 1));
-
-                  DateTime firstAlarmTime = time1.subtract(const Duration(minutes: 10));
-
-                  newRawData.add("HEAD|$h1|$m1");
-
-                  // تنظیم آلارم ۱ (سکو): بیدارباش قطعی اندروید با دقیق‌ترین متد سخت‌افزاری
-                  newRawData.add("PLATFORM|${firstAlarmTime.hour}|${firstAlarmTime.minute}");
-                  if (firstAlarmTime.isAfter(now)) {
-                    await AndroidAlarmManager.oneShot(firstAlarmTime.difference(now), alarmIdCounter, fireAlarmCallback, exact: true, wakeup: true, allowWhileIdle: true);
+                if (type.isNotEmpty) {
+                  Iterable<RegExpMatch> matches = timeRegex.allMatches(cleanLine);
+                  if (matches.length >= 2) {
+                    String t1 = matches.elementAt(0).group(0)!;
+                    String t2 = matches.elementAt(1).group(0)!;
+                    parsedTrips.add(TrainTrip(
+                      rawLine: cleanLine,
+                      type: type,
+                      startTime: t1,
+                      endTime: t2,
+                    ));
                   }
-
-                  // تنظیم آلارم ۲ (حرکت): بیدارباش قطعی اندروید با دقیق‌ترین متد سخت‌افزاری
-                  newRawData.add("MOVE|${time2.hour}|${time2.minute}");
-                  if (time2.isAfter(now)) {
-                    await AndroidAlarmManager.oneShot(time2.difference(now), alarmIdCounter + 1, fireAlarmCallback, exact: true, wakeup: true, allowWhileIdle: true);
-                  }
-                  
-                  alarmIdCounter += 2;
                 }
               }
 
-              if (newRawData.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('⚠️ هیچ خط زمانی معتبری یافت نشد!')));
-                return;
-              }
-
-              rawAlarmsData = newRawData;
-              _saveData(text, rawAlarmsData);
-              _updateRemainingTimesDisplay();
-              
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(backgroundColor: Colors.green, content: Text('✅ تمام آلارم‌ها برای همه حالات (باز/قفل/خواب) با موفقیت هماهنگ شدند.')));
-            }
-
-            // تست چند ثانیه‌ای هوشمند: ۵ ثانیه مهلت برای تست در تمام حالات (باز، قفل یا جیب)
-            void runFastTest() async {
-              // مقداردهی با allowWhileIdle برای دور زدن خواب عمیق گوشی در ثانیه‌ی پنجم
-              await AndroidAlarmManager.oneShot(const Duration(seconds: 5), 777, fireAlarmCallback, exact: true, wakeup: true, allowWhileIdle: true);
-              
               setState(() {
-                displayLogs = ["🧪 تست کلید خورد! دکمه قفل گوشی را بزن و ۵ ثانیه منتظر بمان تا بوق سخت‌افزاری را بشنوی."];
+                trips = parsedTrips;
               });
-            }
-
-            void clearAll() async {
-              final prefs = await SharedPreferences.getInstance();
-              await flutterLocalNotificationsPlugin.cancelAll();
-              for (int i = 1; i < 100; i++) {
-                await AndroidAlarmManager.cancel(i);
-              }
-              await AndroidAlarmManager.cancel(777);
-              await prefs.clear();
-              setState(() { _controller.clear(); rawAlarmsData.clear(); displayLogs.clear(); });
             }
 
             @override
             Widget build(BuildContext context) {
               return Scaffold(
-                appBar: AppBar(title: const Text('سیستم بومی آلارم راهبران')),
+                appBar: AppBar(title: const Text('📋 سیستم تنظیم برنامه سیر قطار'), backgroundColor: Colors.black12, centerTitle: true),
                 body: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     children: [
-                      TextField(controller: _controller, maxLines: 5, onChanged: (text) => _saveData(text, rawAlarmsData), style: const TextStyle(fontSize: 15), decoration: const InputDecoration(hintText: 'متن پیام اعزام روزانه را پیست کنید...', border: OutlineInputBorder())),
+                      TextField(
+                        controller: _controller,
+                        maxLines: 5,
+                        onChanged: _saveText,
+                        style: const TextStyle(fontSize: 14, color: Colors.white),
+                        decoration: const InputDecoration(
+                          hintText: 'متن پیامک اعزام روزانه را اینجا پیست کنید...',
+                          border: OutlineInputBorder(),
+                          fillColor: Color(0xFF1E1E1E),
+                          filled: true,
+                        ),
+                      ),
                       const SizedBox(height: 12),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size.fromHeight(48)), onPressed: processTextAndSetAlarms, child: const Text('⚡ استخراج ساعت و تنظیم خودکار آلارم‌ها')),
-                      const SizedBox(height: 8),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)), onPressed: runFastTest, child: const Text('🧪 تست آلارم (۵ ثانیه بعد در همه حالات)')),
-                      const SizedBox(height: 8),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, minimumSize: const Size.fromHeight(48)), onPressed: clearAll, child: const Text('❌ پاک کردن تمام آلارم‌ها')),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size.fromHeight(48)),
+                        onPressed: () => _parseText(_controller.text),
+                        icon: const Icon(Icons.analytics_outlined, color: Colors.white),
+                        label: const Text('📊 پردازش و استخراج گراف حرکت', style: TextStyle(fontSize: 15, color: Colors.white)),
+                      ),
                       const SizedBox(height: 15),
-                      Expanded(child: displayLogs.isEmpty ? const Center(child: Text('هیچ آلارم فعالی وجود ندارد')) : ListView.builder(itemCount: displayLogs.length, itemBuilder: (context, index) {
-                        bool childLine = displayLogs[index].startsWith('  ');
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(childLine ? Icons.alarm : Icons.timelapse, color: childLine ? (displayLogs[index].contains('🔹') ? Colors.blue : Colors.amber) : Colors.green),
-                          title: Text(displayLogs[index], style: TextStyle(fontSize: 13, fontWeight: childLine ? FontWeight.normal : FontWeight.bold, color: displayLogs[index].contains('✅') ? Colors.grey : Colors.white)),
-                        );
-                      }))
+                      const Align(
+                        alignment: Alignment.centerRight,
+                        child: Text('👇 ردیف‌های اعزام ردیابی شده (برای مشاهده گراف کلیک کنید):', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: trips.isEmpty
+                            ? const Center(child: Text('هیچ مسیر اعزامی یافت نشد. متن را وارد کرده و دکمه بالا را بزنید.'))
+                            : ListView.builder(
+                                itemCount: trips.length,
+                                itemBuilder: (context, index) {
+                                  final trip = trips[index];
+                                  bool isGhadir = trip.type == "S";
+                                  return Card(
+                                    color: const Color(0xFF1E1E1E),
+                                    margin: const EdgeInsets.symmetric(vertical: 6),
+                                    child: ListTile(
+                                      leading: CircleAvatar(
+                                        backgroundColor: isGhadir ? Colors.blue.withOpacity(0.2) : Colors.amber.withOpacity(0.2),
+                                        child: Text(trip.type, style: TextStyle(color: isGhadir ? Colors.blue : Colors.amber, fontWeight: BallStyle().fontWeight)),
+                                      ),
+                                      title: Text(trip.rawLine, style: const TextStyle(fontSize: 14, letterSpacing: 1)),
+                                      subtitle: Text(isGhadir ? 'مبدأ: غدیر 👈 مقصد: وکیل‌آباد' : 'مبدأ: وکیل‌آباد 👈 مقصد: غدیر', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                                      trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.green),
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(builder: (context) => GraphScreen(trip: trip)),
+                                        );
+                                      },
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+          }
+
+          // تمدید متد کلیک لایف سناریو کارت
+          extension CardClick on Card {
+            Widget InkWellOnCard({required VoidCallback onPressed, required Widget child}) {
+              return InkWell(onTap: onPressed, child: child);
+            }
+          }
+          extension ListTileClick on ListTile {
+            void onPressed(VoidCallback action) {
+              // هدایت کلیک به سمت گراف صفحه بعد
+            }
+          }
+
+          // 📈 صفحه جدید تفصیلی برای ترسیم و نمایش جدول زمانی گراف
+          class GraphScreen extends StatelessWidget {
+            final TrainTrip trip;
+            const GraphScreen({Key? key, required this.trip}) : super(key: key);
+
+            // محاسبه تجمعی ثانیه‌ها به زمان واقعی ساعت و دقیقه
+            String _calculateStationTime(String startStr, int totalSecondsOffset) {
+              List<String> parts = startStr.split(':');
+              int hour = int.parse(parts[0]);
+              int minute = int.parse(parts[1]);
+
+              int baseTotalSeconds = (hour * 3600) + (minute * 60);
+              int finalTotalSeconds = baseTotalSeconds + totalSecondsOffset;
+
+              int finalHour = (finalTotalSeconds ~/ 3600) % 24;
+              int finalMinute = (finalTotalSeconds % 3600) ~/ 60;
+              int finalSecond = finalTotalSeconds % 60;
+
+              return "${finalHour.toString().padLeft(2, '0')}:${finalMinute.toString().padLeft(2, '0')}:${finalSecond.toString().padLeft(2, '0')}";
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              bool isGhadir = trip.type == "S";
+
+              // ۱. داده‌های خام مسیر رفت (غدیر به وکیل‌آباد)
+              final List<Map<String, dynamic>> ghadirToVakil = [
+                {"name": "غدیر (مبدأ)", "sec": 0},
+                {"name": "پروین اعتصامی", "sec": 152}, // 02:32
+                {"name": "۱۷ شهریور", "sec": 238},    // + 01:26
+                {"name": "بسیج", "sec": 350},         // + 01:52
+                {"name": "امام خمینی", "sec": 457},    // + 01:47
+                {"name": "شریعتی", "sec": 614},       // + 02:37
+                {"name": "قائم", "sec": 716},         // + 01:42
+                {"name": "طالقانی", "sec": 804},       // + 01:28
+                {"name": "فلسطین", "sec": 916},       // + 01:52
+                {"name": "خیام", "sec": 1038},        // + 02:02
+                {"name": "آزادی", "sec": 1138},        // + 01:40
+                {"name": "پارک ملت", "sec": 1270},     // + 02:12
+                {"name": "کوثر", "sec": 1361},         // + 01:31
+                {"name": "سید رضی", "sec": 1456},      // + 01:35
+                {"name": "دانشجو", "sec": 1546},       // + 01:30
+                {"name": "هفت تیر", "sec": 1639},      // + 01:33
+                {"name": "صدف", "sec": 1729},         // + 01:30
+                {"name": "صیاد شیرازی", "sec": 1822},  // + 01:33
+                {"name": "اقبال لاهوری", "sec": 1920},  // + 01:38
+                {"name": "نمایشگاه", "sec": 2025},     // + 01:45
+                {"name": "کوهستان پارک", "sec": 2120},  // + 01:35
+                {"name": "وکیل‌آباد (مقصد)", "sec": 2535}, // + 06:55
+              ];
+
+              // ۲. داده‌های خام مسیر برگشت (وکیل‌آباد به غدیر)
+              final List<Map<String, dynamic>> vakilToGhadir = [
+                {"name": "وکیل‌آباد (مبدأ)", "sec": 0},
+                {"name": "کوهستان پارک", "sec": 240},  // 04:00
+                {"name": "نمایشگاه", "sec": 340},     // + 01:40
+                {"name": "اقبال لاهوری", "sec": 441},  // + 01:41
+                {"name": "صیاد شیرازی", "sec": 526},  // + 01:25
+                {"name": "صدف", "sec": 626},         // + 01:35
+                {"name": "هفت تیر", "sec": 716},      // + 01:30
+                {"name": "دانشجو", "sec": 810},       // + 01:34
+                {"name": "سید رضی", "sec": 910},      // + 01:40
+                {"name": "کوثر", "sec": 1027},        // + 01:57
+                {"name": "پارک ملت", "sec": 1145},     // + 01:58
+                {"name": "آزادی", "sec": 1246},        // + 01:41
+                {"name": "خیام", "sec": 1373},        // + 02:07
+                {"name": "فلسطین", "sec": 1490},       // + 01:57
+                {"name": "طالقانی", "sec": 1589},       // + 01:39
+                {"name": "قائم", "sec": 1708},         // + 01:59
+                {"name": "شریعتی", "sec": 1835},       // + 02:07
+                {"name": "امام خمینی", "sec": 1950},    // + 01:55
+                {"name": "بسیج", "sec": 2042},         // + 01:32
+                {"name": "۱۷ شهریور", "sec": 2122},    // + 01:20
+                {"name": "پروین اعتصامی", "sec": 2297}, // + 02:55
+                {"name": "غدیر (مقصد)", "sec": 2392},   // مجموع کل ثانیه‌ها
+              ];
+
+              final List<Map<String, dynamic>> activeRoute = isGhadir ? ghadirToVakil : vakilToGhadir;
+
+              return Scaffold(
+                appBar: AppBar(
+                  title: Text(isGhadir ? '📈 گراف زمانی رفت (غدیر 👈 وکیل‌آباد)' : '📉 گراف زمانی برگشت (وکیل‌آباد 👈 غدیر)', style: const TextStyle(fontSize: 15)),
+                  backgroundColor: Colors.black25,
+                ),
+                body: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: isGhadir ? Colors.blue.withOpacity(0.1) : Colors.amber.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                        child: Text('⏰ ساعت اعزام از مبدأ: ${trip.endTime} | زمان پایان سیر: ${trip.startTime}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: activeRoute.length,
+                          itemBuilder: (context, index) {
+                            final station = activeRoute[index];
+                            String realTime = _calculateStationTime(trip.endTime, station["sec"]);
+
+                            bool isTerminal = index == 0 || index == activeRoute.length - 1;
+
+                            return IntrinsicHeight(
+                              child: Row(
+                                children: [
+                                  // نمایش ساعت واقعی رسیدن به ایستگاه
+                                  SizedBox(
+                                    width: 85,
+                                    child: Text(realTime, style: TextStyle(fontWeight: isTerminal ? FontWeight.bold : FontWeight.normal, color: isTerminal ? Colors.green : Colors.white, fontSize: 14, letterSpacing: 0.5)),
+                                  ),
+                                  // طراحی ریل و گره گرافیکی ایستگاه
+                                  Column(
+                                    children: [
+                                      Container(
+                                        width: 14,
+                                        height: 14,
+                                        decoration: BoxDecoration(
+                                          color: isTerminal ? Colors.green : (isGhadir ? Colors.blue : Colors.amber),
+                                          shape: BoxShape.circle,
+                                          boxShadow: [BoxShadow(color: Colors.white10, blurRadius: 4)],
+                                        ),
+                                      ),
+                                      if (index != activeRoute.length - 1)
+                                        Expanded(
+                                          child: Container(width: 3, color: Colors.white24),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 15),
+                                  // نام ایستگاه
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                      child: Text(
+                                        station["name"],
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: isTerminal ? FontWeight.bold : FontWeight.normal,
+                                          color: isTerminal ? Colors.green : Colors.white90,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -313,10 +365,10 @@ jobs:
           }
           EOF
 
-          # ۲. ساخت فایل پکیج‌ها
+          # ۲. تنظیم پکیج‌های سبک بدون کتابخانه‌های مزاحم اندروید
           cat << 'EOF' > pubspec.yaml
           name: train_alarm_app
-          description: "A new Flutter project for train drivers."
+          description: "A graph visualization project for train drivers."
           publish_to: 'none'
           version: 1.0.0+1
           environment:
@@ -325,8 +377,6 @@ jobs:
             flutter:
               sdk: flutter
             cupertino_icons: ^1.0.8
-            android_alarm_manager_plus: ^4.0.8
-            flutter_local_notifications: ^17.2.2
             shared_preferences: ^2.2.3
           dev_dependencies:
             flutter_test:
@@ -336,11 +386,9 @@ jobs:
             uses-material-design: true
           EOF
 
-          # ۳. اضافه کردن مجوزهای دائمی سرویس پیش‌زمینه و آلارم بیکاری سیستم
+          # ۳. مانیفست ساده بدون دسترسی‌های سنگین
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
-          sed -i '/<activity/i \        <service android:name="dev.fluttercommunity.androidalarmmanager.AlarmService" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />\n        <receiver android:name="dev.fluttercommunity.androidalarmmanager.AlarmBroadcastReceiver" android:exported="false" />\n        <receiver android:name="dev.fluttercommunity.androidalarmmanager.RebootBroadcastReceiver" android:exported="false">\n            <intent-filter>\n                <action android:name="android.intent.action.BOOT_COMPLETED" />\n            </intent-filter>\n        </receiver>' $MANIFEST_PATH
-          sed -i 's/android:label=".*"/android:label="آلارم راهبران"/' $MANIFEST_PATH
+          sed -i 's/android:label=".*"/android:label="گراف سیر راهبران"/' $MANIFEST_PATH
 
           # ۴. تنظیمات کامل build.gradle.kts
           cat << 'EOF' > android/app/build.gradle.kts
@@ -355,10 +403,8 @@ jobs:
               compileSdk = flutter.compileSdkVersion
 
               compileOptions {
-                  isCoreLibraryDesugaringEnabled = true
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
-                  
               }
 
               defaultConfig {
@@ -374,16 +420,6 @@ jobs:
                       signingConfig = signingConfigs.getByName("debug")
                   }
               }
-          }
-
-          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-              compilerOptions {
-                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-              }
-          }
-
-          dependencies {
-              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
           }
           EOF
 
