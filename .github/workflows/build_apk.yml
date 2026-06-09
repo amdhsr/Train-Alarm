@@ -5,7 +5,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # رفع هشدار گیت‌هاب و اجبار به استفاده از نسخه جدید Node.js
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
@@ -23,13 +22,10 @@ jobs:
 
       - name: Auto Create and Repair Project
         run: |
-          # ۱. پاک کردن بقایای ناقص قبلی
           rm -rf lib pubspec.yaml android
-          
-          # ۲. ساخت یک پروژه کاملاً استاندارد، سالم و نو با تمام فایل‌های اندروید
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۳. تزریق کدهای اختصاصی شما به درون پروژه استاندارد
+          # ۱. تزریق کدهای اختصاصی شما
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
@@ -151,7 +147,7 @@ jobs:
           }
           EOF
 
-          # ۴. ساخت فایل پکیج‌ها به صورت خودکار
+          # ۲. ساخت فایل پکیج‌ها
           cat << 'EOF' > pubspec.yaml
           name: train_alarm_app
           description: "A new Flutter project for train drivers."
@@ -163,7 +159,7 @@ jobs:
             flutter:
               sdk: flutter
             cupertino_icons: ^1.0.8
-            android_alarm_manager_plus: ^4.0.3
+            android_alarm_manager_plus: ^4.0.8
             flutter_local_notifications: ^17.2.2
             shared_preferences: ^2.2.3
           dev_dependencies:
@@ -174,7 +170,7 @@ jobs:
             uses-material-design: true
           EOF
 
-          # ۵. تنظیم دسترسی‌های بومی اندروید برای کارکرد آلارم در صفحه قفل
+          # ۳. تنظیم دسترسی‌های بومی اندروید
           cat << 'EOF' > android/app/src/main/AndroidManifest.xml
           <manifest xmlns:android="http://schemas.github.com/apk/res/android" package="com.example.train_alarm_app">
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
@@ -208,6 +204,10 @@ jobs:
               </application>
           </manifest>
           EOF
+
+          # ۴. حل مشکل Desugaring با دستکاری خودکار فایل build.gradle اندروید
+          sed -i '/android {/a \    compileOptions {\n        coreLibraryDesugaringEnabled true\n        sourceCompatibility JavaVersion.VERSION_1_8\n        targetCompatibility JavaVersion.VERSION_1_8\n    }' android/app/build.gradle
+          sed -i '/dependencies {/a \    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"' android/app/build.gradle
 
       - name: Get Packages
         run: flutter pub get
