@@ -205,9 +205,47 @@ jobs:
           </manifest>
           EOF
 
-          # ۴. حل مشکل Desugaring با فرمت کدهای جدید build.gradle.kts (نسخه‌های جدید فلاتر)
-          sed -i '/android {/a \    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility = JavaVersion.VERSION_1_8\n        targetCompatibility = JavaVersion.VERSION_1_8\n    }' android/app/build.gradle.kts
-          sed -i '/dependencies {/a \    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")' android/app/build.gradle.kts
+          # ۴. بازنویسی کامل فایل build.gradle.kts به صورت ۱۰۰٪ آماده با پکیج Desugaring فعال
+          cat << 'EOF' > android/app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+              id("kotlin-android")
+              id("dev.flutter.flutter-gradle-plugin")
+          }
+
+          android {
+              namespace = "com.example.train_alarm_app"
+              compileSdk = flutter.compileSdkVersion
+
+              compileOptions {
+                  isCoreLibraryDesugaringEnabled = true
+                  sourceCompatibility = JavaVersion.VERSION_1_8
+                  targetCompatibility = JavaVersion.VERSION_1_8
+              }
+
+              kotlinOptions {
+                  jvmTarget = "1.8"
+              }
+
+              defaultConfig {
+                  applicationId = "com.example.train_alarm_app"
+                  minSdk = 21 // حداقل نسخه مورد نیاز برای آلارم و نوتیفیکیشن
+                  targetSdk = flutter.targetSdkVersion
+                  versionCode = flutter.versionCode
+                  versionName = flutter.versionName
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.getByName("debug")
+                  }
+              }
+          }
+
+          dependencies {
+              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+          }
+          EOF
 
       - name: Get Packages
         run: flutter pub get
