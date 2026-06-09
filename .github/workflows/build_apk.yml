@@ -170,12 +170,12 @@ jobs:
             uses-material-design: true
           EOF
 
-          # ۳. تنظیم دسترسی‌های مانیفست اندروید به روش تک‌خطی و ایمن
+          # ۳. تزریق دسترسی‌های مانیفست اندروید به روش تک‌خطی و ایمن
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
           sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
           sed -i 's/android:label=".*"/android:label="آلارم راهبران"/' $MANIFEST_PATH
 
-          # ۴. تنظیمات کامل build.gradle.kts (همسان‌سازی قطعی جاوا و کاتلین روی نسخه ۱۷)
+          # ۴. ساخت ساختار کاملاً نوین و مدرن build.gradle.kts سازگار با آخرین تغییرات ۲۰۲۶
           cat << 'EOF' > android/app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -193,10 +193,6 @@ jobs:
                   targetCompatibility = JavaVersion.VERSION_17
               }
 
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-
               defaultConfig {
                   applicationId = "com.example.train_alarm_app"
                   minSdk = 21
@@ -209,6 +205,13 @@ jobs:
                   release {
                       signingConfig = signingConfigs.getByName("debug")
                   }
+              }
+          }
+
+          // روش نوین کامپایل کاتلین برای جاوا ۱۷ جهت هماهنگی با گریدل‌های جدید
+          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+              compilerOptions {
+                  jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
               }
           }
 
