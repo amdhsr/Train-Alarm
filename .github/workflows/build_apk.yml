@@ -25,7 +25,7 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. تزریق کدهای اختصاصی شما (با اصلاح خطای تایپی خط ۱۳)
+          # ۱. تزریق کدهای اختصاصی شما
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
@@ -170,12 +170,12 @@ jobs:
             uses-material-design: true
           EOF
 
-          # ۳. تزریق دسترسی‌های مانیفست اندروید به روش تک‌خطی و ایمن
+          # ۳. تنظیم دسترسی‌های مانیفست اندروید به روش تک‌خطی و ایمن
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
           sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
           sed -i 's/android:label=".*"/android:label="آلارم راهبران"/' $MANIFEST_PATH
 
-          # ۴. تنظیمات کامل build.gradle.kts
+          # ۴. تنظیمات کامل build.gradle.kts (همسان‌سازی قطعی جاوا و کاتلین روی نسخه ۱۷)
           cat << 'EOF' > android/app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -189,8 +189,12 @@ jobs:
 
               compileOptions {
                   isCoreLibraryDesugaringEnabled = true
-                  sourceCompatibility = JavaVersion.VERSION_1_8
-                  targetCompatibility = JavaVersion.VERSION_1_8
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
               }
 
               defaultConfig {
