@@ -5,12 +5,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Create Dummy Project Structure
-        run: |
-          mkdir -p android/app
-          # ایجاد یک فایل موقت برای اینکه ساختار پوشه حفظ شود
-          echo "void main() {}" > lib/main.dart 
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -22,7 +16,21 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+
+      - name: Create Real Flutter Project & Inject Code
+        run: |
+          # ۱. ساخت یک پروژه کاملاً استاندارد و نو در یک پوشه موقت
+          flutter create --org com.example --project-name train_alarm_app temp_project
           
+          # ۲. کپی کردن فایل‌های تنظیم شده شما به داخل پروژه استاندارد
+          cp lib/main.dart temp_project/lib/main.dart
+          cp pubspec.yaml temp_project/pubspec.yaml
+          cp android/app/src/main/AndroidManifest.xml temp_project/android/app/src/main/AndroidManifest.xml
+          
+          # ۳. جابجایی پروژه اصلی با پروژه استاندارد شده
+          mv temp_project/* .
+          mv temp_project/.[!.]* . || true
+
       - name: Get Packages
         run: flutter pub get
         
