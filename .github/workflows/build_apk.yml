@@ -6,6 +6,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Create Dummy Project Structure
+        run: |
+          mkdir -p android/app
+          # ایجاد یک فایل موقت برای اینکه ساختار پوشه حفظ شود
+          echo "void main() {}" > lib/main.dart 
+
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
