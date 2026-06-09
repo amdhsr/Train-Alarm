@@ -1,8 +1,12 @@
 name: Build APK
 on: [push, workflow_dispatch]
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # رفع هشدار گیت‌هاب و اجبار به استفاده از نسخه جدید Node.js
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
@@ -17,19 +21,193 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Create Real Flutter Project & Inject Code
+      - name: Auto Create and Repair Project
         run: |
-          # ۱. ساخت یک پروژه کاملاً استاندارد و نو در یک پوشه موقت
-          flutter create --org com.example --project-name train_alarm_app temp_project
+          # ۱. پاک کردن بقایای ناقص قبلی
+          rm -rf lib pubspec.yaml android
           
-          # ۲. کپی کردن فایل‌های تنظیم شده شما به داخل پروژه استاندارد
-          cp lib/main.dart temp_project/lib/main.dart
-          cp pubspec.yaml temp_project/pubspec.yaml
-          cp android/app/src/main/AndroidManifest.xml temp_project/android/app/src/main/AndroidManifest.xml
+          # ۲. ساخت یک پروژه کاملاً استاندارد، سالم و نو با تمام فایل‌های اندروید
+          flutter create --org com.example --project-name train_alarm_app .
           
-          # ۳. جابجایی پروژه اصلی با پروژه استاندارد شده
-          mv temp_project/* .
-          mv temp_project/.[!.]* . || true
+          # ۳. تزریق کدهای اختصاصی شما به درون پروژه استاندارد
+          cat << 'EOF' > lib/main.dart
+          import 'package:flutter/material.dart';
+          import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
+          import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+          import 'package:shared_preferences/shared_preferences.dart';
+
+          final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
+          void main() async {
+            WidgetsFlutterBinding.ensureInitialized();
+            await AndroidAlarmManager.initialize();
+            
+            const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
+            const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
+                
+            await flutterLocalNotificationsPlugin.initialize(
+              initializationSettings,
+              onDidReceiveNotificationResponse: (NotificationResponse response) async {
+                if (response.actionId == 'stop_alarm') {
+                  if (response.id != null) {
+                    await flutterLocalNotificationsPlugin.cancel(response.id!);
+                  }
+                }
+              },
+            );
+            runApp(const TrainAlarmApp());
+          }
+
+          class TrainAlarmApp extends StatelessWidget {
+            const TrainAlarmApp({Key? key}) : super(key: key);
+            @override
+            Widget build(BuildContext context) {
+              return MaterialApp(
+                debugShowCheckedModeBanner: false,
+                home: const MainAlarmScreen(),
+                theme: ThemeData.dark(),
+              );
+            }
+          }
+
+          class MainAlarmScreen extends StatefulWidget {
+            const MainAlarmScreen({Key? key}) : super(key: key);
+            @override
+            State<MainAlarmScreen> createState() => _MainAlarmScreenState();
+          }
+
+          class _MainAlarmScreenState extends State<MainAlarmScreen> {
+            final TextEditingController _controller = TextEditingController();
+            List<String> logList = [];
+
+            @override
+            void initState() {
+              super.initState();
+              _loadSavedData();
+            }
+
+            void _loadSavedData() async {
+              final prefs = await SharedPreferences.getInstance();
+              setState(() {
+                _controller.text = prefs.getString('raw_text') ?? '';
+                logList = prefs.getStringList('logs') ?? [];
+              });
+            }
+
+            void _saveCurrentText(String text) async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('raw_text', text);
+            }
+
+            void runFastTest() async {
+              final prefs = await SharedPreferences.getInstance();
+              await AndroidAlarmManager.oneShot(const Duration(minutes: 1), 1, fireFirstAlarmNotification, exact: true, wakeup: true);
+              await AndroidAlarmManager.oneShot(const Duration(minutes: 2), 2, fireSecondAlarmNotification, exact: true, wakeup: true);
+              setState(() {
+                logList = ["🧪 تست فعال شد: آلارم اول ۱ دقیقه بعد", "🧪 تست فعال شد: آلارم دوم ۲ دقیقه بعد"];
+              });
+              await prefs.setStringList('logs', logList);
+            }
+
+            void clearAll() async {
+              final prefs = await SharedPreferences.getInstance();
+              await AndroidAlarmManager.cancel(1);
+              await AndroidAlarmManager.cancel(2);
+              await flutterLocalNotificationsPlugin.cancelAll();
+              await prefs.clear();
+              setState(() { _controller.clear(); logList.clear(); });
+            }
+
+            @override
+            Widget build(BuildContext context) {
+              return Scaffold(
+                appBar: AppBar(title: const Text('سیستم بومی آلارم راهبران')),
+                body: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      TextField(controller: _controller, maxLines: 5, onChanged: _saveCurrentText, decoration: const InputDecoration(hintText: 'متن پیام اعزام یا تست...', border: OutlineInputBorder())),
+                      const SizedBox(height: 15),
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(50)), onPressed: runFastTest, child: const Text('🧪 تست سریع پس‌زمینه (۱ و ۲ دقیقه بعد)')),
+                      const SizedBox(height: 10),
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, minimumSize: const Size.fromHeight(50)), onPressed: clearAll, child: const Text('❌ پاک کردن تمام آلارم‌ها')),
+                      const SizedBox(height: 20),
+                      Expanded(child: logList.isEmpty ? const Center(child: Text('هیچ آلارم فعالی وجود ندارد')) : ListView.builder(itemCount: logList.length, itemBuilder: (context, index) => ListTile(leading: const Icon(Icons.alarm, color: Colors.amber), title: Text(logList[index]))))
+                    ],
+                  ),
+                ),
+              );
+            }
+          }
+
+          void fireFirstAlarmNotification() async {
+            const AndroidNotificationDetails androidDetails = AndroidNotificationDetails('alarm_channel_1', 'آلارم اصلی', importance: Importance.max, priority: Priority.high, sound: RawResourceAndroidNotificationSound('digital_alarm'), playSound: true, enableVibration: true, fullScreenIntent: true, actions: [AndroidNotificationAction('stop_alarm', '❌ قطع صدا', showsUserInterface: true)]);
+            await flutterLocalNotificationsPlugin.show(1, '🚨 زمان حضور روی سکو!', '۱۰ دقیقه به اعزام باقی مانده است.', const NotificationDetails(android: androidDetails));
+          }
+
+          void fireSecondAlarmNotification() async {
+            const AndroidNotificationDetails androidDetails = AndroidNotificationDetails('alarm_channel_2', 'آلارم ثانویه', importance: Importance.max, priority: Priority.high, sound: RawResourceAndroidNotificationSound('digital_alarm'), playSound: true, enableVibration: true, fullScreenIntent: true, actions: [AndroidNotificationAction('stop_alarm', '❌ قطع صدا', showsUserInterface: true)]);
+            await flutterLocalNotificationsPlugin.show(2, '🚨 آماده‌ی اعزام!', 'ساعت حرکت نهایی فرا رسیده است.', const NotificationDetails(android: androidDetails));
+          }
+          EOF
+
+          # ۴. ساخت فایل پکیج‌ها به صورت خودکار
+          cat << 'EOF' > pubspec.yaml
+          name: train_alarm_app
+          description: "A new Flutter project for train drivers."
+          publish_to: 'none'
+          version: 1.0.0+1
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+            cupertino_icons: ^1.0.8
+            android_alarm_manager_plus: ^4.0.3
+            flutter_local_notifications: ^17.2.2
+            shared_preferences: ^2.2.3
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^3.0.0
+          flutter:
+            uses-material-design: true
+          EOF
+
+          # ۵. تنظیم دسترسی‌های بومی اندروید برای کارکرد آلارم در صفحه قفل
+          cat << 'EOF' > android/app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.github.com/apk/res/android" package="com.example.train_alarm_app">
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+              <uses-permission android:name="android.permission.WAKE_LOCK"/>
+              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+              <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+              <uses-permission android:name="android.permission.VIBRATE"/>
+              <application
+                  android:label="آلارم راهبران"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                        android:name="io.flutter.embedding.android.NormalTheme"
+                        android:resource="@style/NormalTheme"/>
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <meta-data
+                      android:name="flutterEmbedding"
+                      android:value="2" />
+              </application>
+          </manifest>
+          EOF
 
       - name: Get Packages
         run: flutter pub get
