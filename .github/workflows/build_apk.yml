@@ -25,7 +25,7 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. تزریق کدهای اختصاصی شما
+          # ۱. تزریق کدهای هوشمند نسخه پردازشگر متن
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
@@ -95,6 +95,60 @@ jobs:
               await prefs.setString('raw_text', text);
             }
 
+            // ⚡ موتور هوشمند استخراج ساعت و تنظیم آلارم واقعی از روی متن پیست شده
+            void processTextAndSetAlarms() async {
+              final prefs = await SharedPreferences.getInstance();
+              String text = _controller.text;
+              
+              // جستجوی فرمت ساعت (مثلا ۱۴:۳۰ یا 14:30) در متن
+              RegExp timeRegex = RegExp(r'(\d{1,2}):(\d{2})');
+              Iterable<RegExpMatch> matches = timeRegex.allMatches(text);
+              
+              if (matches.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('⚠️ هیچ ساعتی (مثلا ۱۵:۳۰) در متن پیدا نشد!'))
+                );
+                return;
+              }
+
+              // استخراج اولین ساعت پیدا شده در متن پیامک
+              var match = matches.first;
+              int targetHour = int.parse(match.group(1)!);
+              int targetMinute = int.parse(match.group(2)!);
+
+              DateTime now = DateTime.now();
+              DateTime targetTime = DateTime(now.year, now.month, now.day, targetHour, targetMinute);
+
+              // اگر ساعت اعزام گذشته باشد، برای فردا تنظیم می‌شود
+              if (targetTime.isBefore(now)) {
+                targetTime = targetTime.add(const Duration(days: 1));
+              }
+
+              // محاسبه فاصله زمانی تا اعزام و آلارم ۱۰ دقیقه قبل
+              Duration timeUntilTarget = targetTime.difference(now);
+              Duration timeUntilFirstAlarm = timeUntilTarget - const Duration(minutes: 10);
+
+              setState(() {
+                logList = [];
+                logList.add("🕒 ساعت اعزام ردیابی شده: $targetHour:$targetMinute");
+              });
+
+              // ۱. تنظیم آلارم اول (۱۰ دقیقه قبل از اعزام) - اگر هنوز وقت باقی باشد
+              if (timeUntilFirstAlarm.isNegative) {
+                logList.add("⚠️ زمان آلارم اول (۱۰ دقیقه قبل) گذشته است!");
+              } else {
+                await AndroidAlarmManager.oneShot(timeUntilFirstAlarm, 1, fireFirstAlarmNotification, exact: true, wakeup: true);
+                logList.add("🚨 آلارم اول سکو فعال شد (${timeUntilFirstAlarm.inMinutes} دقیقه بعد)");
+              }
+
+              // ۲. تنظیم آلارم دوم (دقیقاً راس ساعت حرکت)
+              await AndroidAlarmManager.oneShot(timeUntilTarget, 2, fireSecondAlarmNotification, exact: true, wakeup: true);
+              logList.add("🚨 آلارم دوم اعزام فعال شد (${timeUntilTarget.inMinutes} دقیقه بعد)");
+
+              setState(() {});
+              await prefs.setStringList('logs', logList);
+            }
+
             void runFastTest() async {
               final prefs = await SharedPreferences.getInstance();
               await AndroidAlarmManager.oneShot(const Duration(minutes: 1), 1, fireFirstAlarmNotification, exact: true, wakeup: true);
@@ -122,8 +176,11 @@ jobs:
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     children: [
-                      TextField(controller: _controller, maxLines: 5, onChanged: _saveCurrentText, decoration: const InputDecoration(hintText: 'متن پیام اعزام یا تست...', border: OutlineInputBorder())),
+                      TextField(controller: _controller, maxLines: 5, onChanged: _saveCurrentText, decoration: const InputDecoration(hintText: 'متن پیام اعزام را اینجا کپی و پیست کنید...', border: OutlineInputBorder())),
                       const SizedBox(height: 15),
+                      // ⚡ دکمه جدید و اصلی برای اجرای متن پیست شده
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size.fromHeight(50)), onPressed: processTextAndSetAlarms, child: const Text('⚡ استخراج ساعت و تنظیم خودکار آلارم‌ها')),
+                      const SizedBox(height: 10),
                       ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(50)), onPressed: runFastTest, child: const Text('🧪 تست سریع پس‌زمینه (۱ و ۲ دقیقه بعد)')),
                       const SizedBox(height: 10),
                       ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, minimumSize: const Size.fromHeight(50)), onPressed: clearAll, child: const Text('❌ پاک کردن تمام آلارم‌ها')),
@@ -175,7 +232,7 @@ jobs:
           sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
           sed -i 's/android:label=".*"/android:label="آلارم راهبران"/' $MANIFEST_PATH
 
-          # ۴. ساخت ساختار کاملاً نوین و مدرن build.gradle.kts سازگار با آخرین تغییرات ۲۰۲۶
+          # ۴. تنظیمات کامل build.gradle.kts
           cat << 'EOF' > android/app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -208,7 +265,6 @@ jobs:
               }
           }
 
-          // روش نوین کامپایل کاتلین برای جاوا ۱۷ جهت هماهنگی با گریدل‌های جدید
           tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
               compilerOptions {
                   jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
