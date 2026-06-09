@@ -205,7 +205,7 @@ jobs:
           </manifest>
           EOF
 
-          # ۴. بازنویسی کامل فایل build.gradle.kts به صورت ۱۰۰٪ آماده با پکیج Desugaring فعال
+          # ۴. بازنویسی کامل فایل build.gradle.kts کاملاً منطبق بر استانداردهای جدید و compilerOptions کاتلین
           cat << 'EOF' > android/app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -223,13 +223,9 @@ jobs:
                   targetCompatibility = JavaVersion.VERSION_1_8
               }
 
-              kotlinOptions {
-                  jvmTarget = "1.8"
-              }
-
               defaultConfig {
                   applicationId = "com.example.train_alarm_app"
-                  minSdk = 21 // حداقل نسخه مورد نیاز برای آلارم و نوتیفیکیشن
+                  minSdk = 21
                   targetSdk = flutter.targetSdkVersion
                   versionCode = flutter.versionCode
                   versionName = flutter.versionName
