@@ -25,7 +25,7 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. کدهای فلاتر متمرکز بر سیستم سیر و نمودار گراف قطار (نسخه اصلاح شده بدون باگ دارت)
+          # ۱. کدهای فلاتر متمرکز بر سیستم سیر و نمودار گراف قطار
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:shared_preferences/shared_preferences.dart';
@@ -175,7 +175,7 @@ jobs:
                                       title: Text(trip.rawLine, style: const TextStyle(fontSize: 14, letterSpacing: 1)),
                                       subtitle: Text(isGhadir ? 'مبدأ: غدیر 👈 مقصد: وکیل‌آباد' : 'مبدأ: وکیل‌آباد 👈 مقصد: غدیر', style: const TextStyle(color: Colors.white54, fontSize: 12)),
                                       trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.green),
-                                      onTap: () { // ⚡ اصلاح شد: تبدیل به onTap استاندارد فلاتر
+                                      onTap: () {
                                         Navigator.push(
                                           context,
                                           MaterialPageRoute(builder: (context) => GraphScreen(trip: trip)),
@@ -270,4 +270,150 @@ jobs:
 
               return Scaffold(
                 appBar: AppBar(
-                  title: Text(isGhadir ? '📈 گراف زمانی رفت (غدیر 👈
+                  title: Text(isGhadir ? '📈 گراف زمانی رفت (غدیر 👈 وکیل‌آباد)' : '📉 گراف زمانی برگشت (وکیل‌آباد 👈 غدیر)', style: const TextStyle(fontSize: 15)),
+                  backgroundColor: Colors.black38,
+                ),
+                body: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Column(
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: isGhadir ? Colors.blue.withOpacity(0.1) : Colors.amber.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                        child: Text('⏰ ساعت اعزام از مبدأ: ${trip.endTime} | خط اعزام: ${trip.startTime}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: activeRoute.length,
+                          itemBuilder: (context, index) {
+                            final station = activeRoute[index];
+                            String realTime = _calculateStationTime(trip.endTime, station["sec"]);
+
+                            bool isTerminal = index == 0 || index == activeRoute.length - 1;
+
+                            return IntrinsicHeight(
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 85,
+                                    child: Text(realTime, style: TextStyle(fontWeight: isTerminal ? FontWeight.bold : FontWeight.normal, color: isTerminal ? Colors.green : Colors.white, fontSize: 14, letterSpacing: 0.5)),
+                                  ),
+                                  Column(
+                                    children: [
+                                      Container(
+                                        width: 14,
+                                        height: 14,
+                                        decoration: BoxDecoration(
+                                          color: isTerminal ? Colors.green : (isGhadir ? Colors.blue : Colors.amber),
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                      if (index != activeRoute.length - 1)
+                                        Expanded(
+                                          child: Container(width: 3, color: Colors.white24),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 15),
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                                      child: Text(
+                                        station["name"],
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: isTerminal ? FontWeight.bold : FontWeight.normal,
+                                          color: isTerminal ? Colors.green : Colors.white.withOpacity(0.9),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+          }
+          EOF
+
+          # ۲. تنظیم پکیج‌ها
+          cat << 'EOF' > pubspec.yaml
+          name: train_alarm_app
+          description: "A graph visualization project for train drivers."
+          publish_to: 'none'
+          version: 1.0.0+1
+          environment:
+            sdk: '>=3.0.0 <4.0.0'
+          dependencies:
+            flutter:
+              sdk: flutter
+            cupertino_icons: ^1.0.8
+            shared_preferences: ^2.2.3
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            flutter_lints: ^3.0.0
+          flutter:
+            uses-material-design: true
+          EOF
+
+          # ۳. مانیفست ساده
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          sed -i 's/android:label=".*"/android:label="گراف سیر راهبران"/' $MANIFEST_PATH
+
+          # ۴. تنظیمات کامل build.gradle.kts
+          cat << 'EOF' > android/app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+              id("kotlin-android")
+              id("dev.flutter.flutter-gradle-plugin")
+          }
+
+          android {
+              namespace = "com.example.train_alarm_app"
+              compileSdk = flutter.compileSdkVersion
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              defaultConfig {
+                  applicationId = "com.example.train_alarm_app"
+                  minSdk = 21
+                  targetSdk = flutter.targetSdkVersion
+                  versionCode = flutter.versionCode
+                  versionName = flutter.versionName
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.getByName("debug")
+                  }
+              }
+          }
+          EOF
+
+      - name: Get Packages
+        run: flutter pub get
+        
+      - name: Build Release APK
+        run: flutter build apk --release
+
+      # ⚡ راهکار طلایی: جابه‌جایی دستی فایل به ریشه دایرکتوری برای پیدا شدن ۱۰۰٪ توسط گیت‌هاب
+      - name: Force Move APK to Workspace
+        run: cp build/app/outputs/flutter-apk/app-release.apk ./train-graph.apk
+        
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: train-graph.apk
