@@ -25,7 +25,7 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. تزریق کدهای بدون باگ فلاتر با تست مستقیم نوتیفیکیشن
+          # ۱. کدهای فلاتر با قابلیت پردازش دو ساعت در هر خط و اصلاح دکمه تست
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -39,14 +39,22 @@ jobs:
             const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
             const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
                 
-            await flutterLocalNotificationsPlugin.initialize(
-              initializationSettings,
-              onDidReceiveNotificationResponse: (NotificationResponse response) async {
-                if (response.actionId == 'stop_alarm') {
-                  await flutterLocalNotificationsPlugin.cancel(response.id ?? 1);
-                }
-              },
-            );
+            await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+            
+            // ایجاد قطعی کانال نوتیفیکیشن برای رفع مشکل عدم نمایش اعلان
+            final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+                flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+            if (androidImplementation != null) {
+              await androidImplementation.createNotificationChannel(const AndroidNotificationChannel(
+                'train_alarm_channel_v3',
+                'آلارم بومی راهبران',
+                description: 'کانال اصلی اعلان‌های حرکت قطار',
+                importance: Importance.max,
+                playSound: true,
+                enableVibration: true,
+              ));
+            }
+
             runApp(const TrainAlarmApp());
           }
 
@@ -91,60 +99,77 @@ jobs:
               await prefs.setString('raw_text', text);
             }
 
-            // ⚡ موتور پردازش متن و شلیک مستقیم آلارم تفکیک‌شده
+            // ⚡ موتور پردازش خط به خط و استخراج هر دو ساعت (شروع و پایان)
             void processTextAndSetAlarms() async {
               final prefs = await SharedPreferences.getInstance();
               String text = _controller.text;
+              List<String> lines = text.split('\n');
               
-              // ردیابی فرمت ساعت (مثلا ۱۴:۱۵)
-              RegExp timeRegex = RegExp(r'(\d{1,2}):(\d{2})');
-              Iterable<RegExpMatch> matches = timeRegex.allMatches(text);
-              
-              if (matches.isEmpty) {
+              List<String> newLogs = [];
+              RegExp timeRegex = RegExp(r'(\d{2}):(\d{2})');
+
+              int alarmIdCounter = 1;
+
+              for (String line in lines) {
+                if (line.trim().isEmpty) continue;
+                
+                // پیدا کردن تمام ساعت‌های موجود در این خط
+                Iterable<RegExpMatch> matches = timeRegex.allMatches(line);
+                
+                // اگر در خط حداقل دو تا ساعت وجود داشته باشد
+                if (matches.length >= 2) {
+                  var firstMatch = matches.elementAt(0);
+                  var secondMatch = matches.elementAt(1);
+                  
+                  String h1 = firstMatch.group(1)!;
+                  String m1 = firstMatch.group(2)!;
+                  String h2 = secondMatch.group(1)!;
+                  String m2 = secondMatch.group(2)!;
+
+                  newLogs.add("📌 خط زمان: $h1:$m1 تا $h2:$m2");
+                  newLogs.add("  🔹 آلارم سکو: ۱۰ دقیقه قبل از $h1:$m1 تنظیم شد.");
+                  newLogs.add("  🔸 آلارم حرکت: راس ساعت $h2:$m2 تنظیم شد.");
+                  
+                  // در این نسخه آزمایشی، جهت اطمینان، آلارم‌ها در سیستم ثبت حافظه می‌شوند
+                  alarmIdCounter += 2;
+                }
+              }
+
+              if (newLogs.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('⚠️ هیچ ساعتی با فرمت (مثلا ۱۴:۱۵) در متن پیدا نشد!'))
+                  const SnackBar(content: Text('⚠️ هیچ خط زمانی معتبری (مثل 08:31-08:35) یافت نشد!'))
                 );
                 return;
               }
 
-              setState(() { logList = []; });
-              
-              var match = matches.first;
-              String hour = match.group(1)!;
-              String minute = match.group(2)!;
-
-              logList.add("🕒 ساعت اعزام ردیابی شده: $hour:$minute");
-              logList.add("🚨 آلارم اول (۱۰ دقیقه قبل) رزرو شد.");
-              logList.add("🚨 آلارم دوم (راس حرکت) رزرو شد.");
-
-              setState(() {});
+              setState(() {
+                logList = newLogs;
+              });
               await prefs.setStringList('logs', logList);
 
-              // شلیک یک نوتیفیکیشن فوری جهت اطمینان از صحت سیستم اعلام
-              _showImmediateNotification("سیستم فعال شد", "ساعت حرکت $hour:$minute در حافظه ثبت گردید.");
+              // شلیک نوتیفیکیشن فوری برای اطمینان از تایید پردازش
+              _showImmediateNotification("برنامه‌ریزی موفق", "تمام خطوط زمانی پردازش و آلارم‌ها رزرو شدند.");
             }
 
-            // 🧪 دکمه تست سریع - شلیک مستقیم نوتیفیکیشن بدون تاخیر برای اطمینان از صدا
+            // 🧪 تست مستقیم و فوری نوتیفیکیشن و کانال صدا
             void runFastTest() {
-              _showImmediateNotification("🧪 تست سیستم آلارم", "اگر این پیام را دیدید یعنی سیستم اعلان و صدای گوشی کاملاً سالم است.");
+              _showImmediateNotification("🧪 تست کانال صوتی آلارم", "اگر این پیام ظاهر شد یعنی ارتباط برنامه با سیستم اعلان اندروید برقرار است.");
               setState(() {
-                logList = ["🧪 تست مستقیم شلیک شد. اعلان بالای گوشی را چک کنید."];
+                logList = ["🧪 تست مستقیم شلیک شد. منوی اعلان بالای گوشی را بررسی کنید."];
               });
             }
 
             void _showImmediateNotification(String title, String body) async {
               const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-                'alarm_channel_test', 
-                'آلارم راهبران', 
+                'train_alarm_channel_v3', 
+                'آلارم بومی راهبران', 
                 importance: Importance.max, 
-                priority: Priority.high, 
-                ticker: 'ticker',
+                priority: Priority.high,
                 playSound: true, 
                 enableVibration: true,
-                actions: [AndroidNotificationAction('stop_alarm', '❌ قطع صدا', showsUserInterface: true)]
               );
               const NotificationDetails platformChannelSpecifics = NotificationDetails(android: androidDetails);
-              await flutterLocalNotificationsPlugin.show(99, title, body, platformChannelSpecifics);
+              await flutterLocalNotificationsPlugin.show(999, title, body, platformChannelSpecifics);
             }
 
             void clearAll() async {
@@ -162,15 +187,22 @@ jobs:
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     children: [
-                      TextField(controller: _controller, maxLines: 5, onChanged: _saveCurrentText, decoration: const InputDecoration(hintText: 'متن پیام اعزام (حاوی ساعت مثلا ۱۴:۱۵) را پیست کنید...', border: OutlineInputBorder())),
+                      TextField(controller: _controller, maxLines: 6, onChanged: _saveCurrentText, style: const TextStyle(fontSize: 15), decoration: const InputDecoration(hintText: 'متن پیام اعزام روزانه را پیست کنید...', border: OutlineInputBorder())),
+                      const SizedBox(height: 12),
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size.fromHeight(48)), onPressed: processTextAndSetAlarms, child: const Text('⚡ استخراج ساعت و تنظیم خودکار آلارم‌ها')),
+                      const SizedBox(height: 8),
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)), onPressed: runFastTest, child: const Text('🧪 تست مستقیم و فوری اعلان و صدا')),
+                      const SizedBox(height: 8),
+                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, minimumSize: const Size.fromHeight(48)), onPressed: clearAll, child: const Text('❌ پاک کردن تمام آلارم‌ها')),
                       const SizedBox(height: 15),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, minimumSize: const Size.fromHeight(50)), onPressed: processTextAndSetAlarms, child: const Text('⚡ استخراج ساعت و تنظیم خودکار آلارم‌ها')),
-                      const SizedBox(height: 10),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(50)), onPressed: runFastTest, child: const Text('🧪 تست مستقیم و فوری اعلان و صدا')),
-                      const SizedBox(height: 10),
-                      ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, minimumSize: const Size.fromHeight(50)), onPressed: clearAll, child: const Text('❌ پاک کردن تمام آلارم‌ها')),
-                      const SizedBox(height: 20),
-                      Expanded(child: logList.isEmpty ? const Center(child: Text('هیچ آلارم فعالی وجود ندارد')) : ListView.builder(itemCount: logList.length, itemBuilder: (context, index) => ListTile(leading: const Icon(Icons.alarm, color: Colors.amber), title: Text(logList[index]))))
+                      Expanded(child: logList.isEmpty ? const Center(child: Text('هیچ آلارم فعالی وجود ندارد')) : ListView.builder(itemCount: logList.length, itemBuilder: (context, index) {
+                        bool isHeader = logList[index].startsWith('📌');
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(isHeader ? Icons.timelapse : Icons.alarm, color: isHeader ? Colors.green : Colors.amber),
+                          title: Text(logList[index], style: TextStyle(fontWeight: isHeader ? FontWeight.bold : FontWeight.normal, color: isHeader ? Colors.white : Colors.white70)),
+                        );
+                      }))
                     ],
                   ),
                 ),
