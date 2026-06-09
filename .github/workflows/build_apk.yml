@@ -25,8 +25,8 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. تزریق کدهای اختصاصی شما
-          cat << "$EOF" > lib/main.dart
+          # ۱. تزریق کدهای اختصاصی شما (کد بیس مانیتور آلارم)
+          cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
           import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -39,7 +39,7 @@ jobs:
             await AndroidAlarmManager.initialize();
             
             const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
-            const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
+            const InitializationSettings initializationSettings = InitializationSettings(android: android): initializationSettingsAndroid;
                 
             await flutterLocalNotificationsPlugin.initialize(
               initializationSettings,
@@ -145,10 +145,10 @@ jobs:
             const AndroidNotificationDetails androidDetails = AndroidNotificationDetails('alarm_channel_2', 'آلارم ثانویه', importance: Importance.max, priority: Priority.high, sound: RawResourceAndroidNotificationSound('digital_alarm'), playSound: true, enableVibration: true, fullScreenIntent: true, actions: [AndroidNotificationAction('stop_alarm', '❌ قطع صدا', showsUserInterface: true)]);
             await flutterLocalNotificationsPlugin.show(2, '🚨 آماده‌ی اعزام!', 'ساعت حرکت نهایی فرا رسیده است.', const NotificationDetails(android: androidDetails));
           }
-          $EOF
+          EOF
 
           # ۲. ساخت فایل پکیج‌ها
-          cat << "$EOF" > pubspec.yaml
+          cat << 'EOF' > pubspec.yaml
           name: train_alarm_app
           description: "A new Flutter project for train drivers."
           publish_to: 'none'
@@ -168,46 +168,19 @@ jobs:
             flutter_lints: ^3.0.0
           flutter:
             uses-material-design: true
-          $EOF
+          EOF
 
-          # ۳. تنظیم کاملاً ایمن دسترسی‌های اندروید با سپر حفاظتی "$EOF"
-          cat << "$EOF" > android/app/src/main/AndroidManifest.xml
-          <manifest xmlns:android="http://schemas.github.com/apk/res/android" package="com.example.train_alarm_app">
-              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-              <uses-permission android:name="android.permission.WAKE_LOCK"/>
-              <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-              <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
-              <uses-permission android:name="android.permission.VIBRATE"/>
-              
-              <application
-                  android:label="آلارم راهبران"
-                  android:name="${applicationName}"
-                  android:icon="@mipmap/ic_launcher">
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true"
-                      android:launchMode="singleTop"
-                      android:theme="@style/LaunchTheme"
-                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
-                      android:hardwareAccelerated="true"
-                      android:windowSoftInputMode="adjustResize">
-                      <meta-data
-                          android:name="io.flutter.embedding.android.NormalTheme"
-                          android:resource="@style/NormalTheme"/>
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-                  <meta-data
-                      android:name="flutterEmbedding"
-                      android:value="2"/>
-              </application>
-          </manifest>
-          $EOF
+          # ۳. ⚡ روش تک‌خطی ایمن: تزریق لایه‌های دسترسی بدون دستکاری کل فایل مانیفست
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          
+          # افزودن دسترسی‌ها درست قبل از تگ application
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
+          
+          # تغییر نام نمایشی برنامه به صورت متنی و ایمن
+          sed -i 's/android:label=".*"/android:label="آلارم راهبران"/' $MANIFEST_PATH
 
-          # ۴. تنظیمات کامل build.gradle.kts
-          cat << "$EOF" > android/app/build.gradle.kts
+          # ۴. تنظیمات کامل build.gradle.kts به روش استاندارد
+          cat << 'EOF' > android/app/build.gradle.kts
           plugins {
               id("com.android.application")
               id("kotlin-android")
@@ -242,7 +215,7 @@ jobs:
           dependencies {
               coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
           }
-          $EOF
+          EOF
 
       - name: Get Packages
         run: flutter pub get
