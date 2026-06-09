@@ -14,13 +14,11 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
-          cache: 'gradle' # ⚡ کش کردن تنظیمات گریدل برای افزایش سرعت
-
+          
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true # ⚡ کش کردن فایل‌های داخلی فلاتر
 
       - name: Auto Create and Repair Project
         run: |
@@ -245,15 +243,6 @@ jobs:
               coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
           }
           $EOF
-
-      # ⚡ ۵. سیستم ذخیره پیشرفته پکیج‌ها برای تضمین سرعت بالا
-      - name: Cache Pub Packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
 
       - name: Get Packages
         run: flutter pub get
