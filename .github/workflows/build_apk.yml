@@ -14,11 +14,13 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
-          
+          cache: 'gradle' # ⚡ کش کردن تنظیمات گریدل برای افزایش سرعت
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          cache: true # ⚡ کش کردن فایل‌های داخلی فلاتر
 
       - name: Auto Create and Repair Project
         run: |
@@ -26,7 +28,7 @@ jobs:
           flutter create --org com.example --project-name train_alarm_app .
           
           # ۱. تزریق کدهای اختصاصی شما
-          cat << 'EOF' > lib/main.dart
+          cat << "$EOF" > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
           import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -145,10 +147,10 @@ jobs:
             const AndroidNotificationDetails androidDetails = AndroidNotificationDetails('alarm_channel_2', 'آلارم ثانویه', importance: Importance.max, priority: Priority.high, sound: RawResourceAndroidNotificationSound('digital_alarm'), playSound: true, enableVibration: true, fullScreenIntent: true, actions: [AndroidNotificationAction('stop_alarm', '❌ قطع صدا', showsUserInterface: true)]);
             await flutterLocalNotificationsPlugin.show(2, '🚨 آماده‌ی اعزام!', 'ساعت حرکت نهایی فرا رسیده است.', const NotificationDetails(android: androidDetails));
           }
-          EOF
+          $EOF
 
           # ۲. ساخت فایل پکیج‌ها
-          cat << 'EOF' > pubspec.yaml
+          cat << "$EOF" > pubspec.yaml
           name: train_alarm_app
           description: "A new Flutter project for train drivers."
           publish_to: 'none'
@@ -168,11 +170,11 @@ jobs:
             flutter_lints: ^3.0.0
           flutter:
             uses-material-design: true
-          EOF
+          $EOF
 
-          # ۳. اصلاح نهایی و بدون خطای دسترسی‌های بومی اندروید (بدون تداخل متنی)
-          cat << 'EOF' > android/app/src/main/AndroidManifest.xml
-          <manifest xmlns:android="http://schemas.github.com/apk/res/android">
+          # ۳. تنظیم کاملاً ایمن دسترسی‌های اندروید با سپر حفاظتی "$EOF"
+          cat << "$EOF" > android/app/src/main/AndroidManifest.xml
+          <manifest xmlns:android="http://schemas.github.com/apk/res/android" package="com.example.train_alarm_app">
               <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
               <uses-permission android:name="android.permission.WAKE_LOCK"/>
               <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
@@ -204,10 +206,10 @@ jobs:
                       android:value="2"/>
               </application>
           </manifest>
-          EOF
+          $EOF
 
-          # ۴. تنظیمات build.gradle.kts
-          cat << 'EOF' > android/app/build.gradle.kts
+          # ۴. تنظیمات کامل build.gradle.kts
+          cat << "$EOF" > android/app/build.gradle.kts
           plugins {
               id("com.android.application")
               id("kotlin-android")
@@ -242,7 +244,16 @@ jobs:
           dependencies {
               coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
           }
-          EOF
+          $EOF
+
+      # ⚡ ۵. سیستم ذخیره پیشرفته پکیج‌ها برای تضمین سرعت بالا
+      - name: Cache Pub Packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
 
       - name: Get Packages
         run: flutter pub get
