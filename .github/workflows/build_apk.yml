@@ -25,7 +25,7 @@ jobs:
           rm -rf lib pubspec.yaml android windows linux web ios macos analysis_options.yaml
           flutter create --org com.example --project-name train_alarm_app .
           
-          # ۱. تزریق کدهای اختصاصی شما (کد بیس مانیتور آلارم)
+          # ۱. تزریق کدهای اختصاصی شما (با اصلاح خطای تایپی خط ۱۳)
           cat << 'EOF' > lib/main.dart
           import 'package:flutter/material.dart';
           import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
@@ -39,7 +39,7 @@ jobs:
             await AndroidAlarmManager.initialize();
             
             const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
-            const InitializationSettings initializationSettings = InitializationSettings(android: android): initializationSettingsAndroid;
+            const InitializationSettings initializationSettings = InitializationSettings(android: initializationSettingsAndroid);
                 
             await flutterLocalNotificationsPlugin.initialize(
               initializationSettings,
@@ -170,16 +170,12 @@ jobs:
             uses-material-design: true
           EOF
 
-          # ۳. ⚡ روش تک‌خطی ایمن: تزریق لایه‌های دسترسی بدون دستکاری کل فایل مانیفست
+          # ۳. تزریق دسترسی‌های مانیفست اندروید به روش تک‌خطی و ایمن
           MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-          
-          # افزودن دسترسی‌ها درست قبل از تگ application
           sed -i '/<application/i \    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\n    <uses-permission android:name="android.permission.WAKE_LOCK"/>\n    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>\n    <uses-permission android:name="android.permission.VIBRATE"/>' $MANIFEST_PATH
-          
-          # تغییر نام نمایشی برنامه به صورت متنی و ایمن
           sed -i 's/android:label=".*"/android:label="آلارم راهبران"/' $MANIFEST_PATH
 
-          # ۴. تنظیمات کامل build.gradle.kts به روش استاندارد
+          # ۴. تنظیمات کامل build.gradle.kts
           cat << 'EOF' > android/app/build.gradle.kts
           plugins {
               id("com.android.application")
